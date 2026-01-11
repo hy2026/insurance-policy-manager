@@ -1,0 +1,173 @@
+// Coverage Parser 独立数据库
+// 使用PostgreSQL（与zhichu1一致，便于后期共享数据库）
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表（简化版）
+model User {
+  id                      Int                       @id @default(autoincrement())
+  email                   String                    @unique
+  name                    String?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  insurancePoliciesParsed InsurancePolicyParsed[]
+
+  @@map("users")
+}
+
+// 保险产品库（系统预置）
+model InsuranceProduct {
+  id                  Int      @id @default(autoincrement())
+  insuranceCompany    String
+  productName         String
+  policyType          String   // 重疾险/人寿险/意外险/年金险
+  
+  // 新增：用于训练数据管理
+  policyDocumentId    String?  // 保单文件编号（如：东吴人寿[2018]疾病保险092号）
+  approvalDate        DateTime? @db.Date // 合同审批上架时间
+  
+  productInfo         Json?    // 产品基础信息
+  coverages           Json?    // 责任列表（预置）
+  
+  isActive            Boolean  @default(true)
+  verified            Boolean  @default(false) // 是否已审核
+  trainingStatus      String   @default("pending") // pending/annotated/trained/deployed
+  
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // 关联到责任库
+  coverageDetails     InsuranceCoverageLibrary[]
+
+  @@unique([insuranceCompany, productName])
+  @@index([policyType])
+  @@index([insuranceCompany])
+  @@index([trainingStatus])
+  @@map("insurance_product_library")
+}
+
+// 客户保单（解析后的保单）
+model InsurancePolicyParsed {
+  id               Int      @id @default(autoincrement())
+  userId           Int
+  policyNumber     String?
+  insuranceCompany String
+  productName      String
+  policyType       String // 重疾险/人寿险/意外险/年金险
+  entity           String // 主体：本人/配偶/孩子
+  insuredPerson    String
+  policyHolder     String?
+  beneficiary      String?
+  policyStartYear  Int
+  birthYear        Int?
+  basicSumInsured  Float?
+  annualPremium    Float?
+  paymentType      String?
+  paymentPeriod    Int?
+  coverageEndYear  Int?
+  coverages        Json? // 责任列表（Json格式）
+  source           String? // manual/library
+  verified         Boolean  @default(false)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, entity])
+  @@index([userId, policyType])
+  @@index([userId, entity, policyType])
+  @@index([policyNumber])
+  @@map("insurance_policies_parsed")
+}
+
+// 责任库（产品的具体责任，用于训练）
+model InsuranceCoverageLibrary {
+  id                  Int       @id @default(autoincrement())
+  
+  // 关联产品
+  productId           Int
+  product             InsuranceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  // 责任分类
+  coverageType        String    // 疾病责任/身故责任/意外责任/年金责任/满期责任/生存金/其他
+  coverageName        String
+  diseaseCategory     String?   // 重症/中症/轻症/特殊疾病/其他（仅疾病责任）
+  
+  // 原文和解析结果
+  clauseText          String    @db.Text // 原文片段
+  parsedResult        Json?     // 解析后的结构化数据（包含keyAmounts等）
+  
+  // 解析元数据
+  parseMethod         String    @default("llm") // manual/llm/rule/hybrid
+  confidenceScore     Float?    // 置信度（0-1）
+  verified            Boolean   @default(false) // 是否已人工审核
+  verifiedBy          String?
+  verifiedAt          DateTime?
+  
+  // 训练数据标注
+  isTrainingSample    Boolean   @default(false) // 是否作为训练样本
+  annotationQuality   String?   // high/medium/low
+  
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([productId])
+  @@index([coverageType])
+  @@index([isTrainingSample, verified])
+  @@map("insurance_coverage_library")
+}
+
+// 解析规则库
+model ParsingRule {
+  id          Int      @id @default(autoincrement())
+  ruleType    String // payoutAmount/payoutCount/intervalPeriod...
+  pattern     String   @db.Text
+  extraction  Json
+  priority    Int      @default(0)
+  enabled     Boolean  @default(true)
+  usage       Int      @default(0)
+  successRate Float?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([ruleType, enabled])
+  @@index([priority])
+  @@map("parsing_rules")
+}
+
+// 训练数据导出记录
+model TrainingExport {
+  id                  Int       @id @default(autoincrement())
+  
+  exportVersion       String    // 导出版本号（如：v1.0, v2024-01-06）
+  exportType          String    @default("full") // full/incremental
+  
+  // 统计信息
+  totalSamples        Int
+  verifiedSamples     Int
+  coverageBreakdown   Json?     // 责任类型分布
+  
+  // 文件信息
+  filePath            String?
+  fileSizeKb          Int?
+  
+  // 智谱平台信息
+  zhipuJobId          String?   // 智谱训练任务ID
+  zhipuModelId        String?   // 训练后的模型ID
+  trainingStatus      String    @default("exported") // exported/uploaded/training/completed/failed
+  
+  exportedBy          String?
+  exportedAt          DateTime  @default(now())
+
+  @@index([exportVersion])
+  @@index([trainingStatus])
+  @@map("training_exports")
+}
+

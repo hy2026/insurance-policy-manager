@@ -1,0 +1,278 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* HTML原有配色方案 */
+  --primary-color: #5FC8D4;
+  --border-color: #9FE8ED;
+  --bg-light: #E6F7FF;
+  --bg-light-alt: #f0f8fc;
+  --text-primary: #374151;
+  --text-secondary: #666;
+  --text-muted: #999;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #f5f5f5;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* HTML样式：section卡片 */
+.html-section {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  border: 2px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.html-section h2 {
+  color: var(--primary-color);
+  font-size: 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* HTML样式：按钮 */
+.html-btn {
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.html-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7FD4E0 0%, #9FE8ED 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(95, 200, 212, 0.4);
+}
+
+.html-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #01BCD6 !important;
+  color: white !important;
+}
+
+/* 强制覆盖SmartInputPage中的按钮，保持深蓝色 */
+.analyze-btn,
+.complete-btn {
+  background-color: #01BCD6 !important;
+  background: #01BCD6 !important;
+  color: white !important;
+  border-color: #01BCD6 !important;
+}
+
+.analyze-btn:disabled,
+.complete-btn:disabled,
+.analyze-btn[disabled],
+.complete-btn[disabled] {
+  background-color: #01BCD6 !important;
+  background: #01BCD6 !important;
+  color: white !important;
+  border-color: #01BCD6 !important;
+}
+
+.html-btn-secondary {
+  background: #f5f5f5;
+  color: #333;
+  border: 1px solid #e0e0e0;
+}
+
+.html-btn-secondary:hover:not(:disabled) {
+  background: #e8e8e8;
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+/* HTML样式：输入框 */
+.html-input,
+.html-select,
+.html-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 14px;
+  background: white;
+  transition: border-color 0.3s;
+  font-family: inherit;
+}
+
+/* 选择框特殊样式 */
+.html-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%235FC8D4' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.html-input:focus,
+.html-select:focus,
+.html-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.html-textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+
+/* HTML样式：标签 */
+.html-label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.html-label .required,
+.required {
+  color: #ef4444;
+}
+
+/* HTML样式：分割线 */
+.html-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 16px 0;
+}
+
+.html-divider-line {
+  flex: 1;
+  border-top: 2px dashed var(--primary-color);
+}
+
+.html-divider-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-color);
+  white-space: nowrap;
+}
+
+/* HTML样式：卡片 */
+.html-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  border: 2px solid #e0e0e0;
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.html-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(95, 200, 212, 0.2);
+  transform: translateY(-2px);
+}
+
+/* HTML样式：加载动画 */
+.html-loading {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.html-spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid var(--primary-color);
+  border-radius: 50%;
+  animation: html-spin 1s linear infinite;
+  margin: 0 auto 20px;
+}
+
+@keyframes html-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* HTML样式：成员卡片 */
+.family-member-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 150px;
+  padding: 8px 10px 10px 10px;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  background: white;
+  transition: all 0.3s;
+  cursor: pointer;
+  position: relative;
+}
+
+.family-member-card:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(95, 200, 212, 0.2);
+}
+
+.family-member-card.selected {
+  border-color: var(--primary-color);
+  background: var(--bg-light);
+  box-shadow: 0 2px 8px rgba(1, 188, 214, 0.2);
+}
+
+/* 覆盖Ant Design默认样式，使用HTML配色 */
+.ant-btn-primary {
+  background: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+
+.ant-btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7FD4E0 0%, #9FE8ED 100%) !important;
+  border-color: #5FC8D4 !important;
+}
+
+.ant-input:focus,
+.ant-input-number:focus,
+.ant-select:focus .ant-select-selector,
+.ant-picker:focus,
+.ant-input-focused,
+.ant-input-number-focused,
+.ant-select-focused .ant-select-selector,
+.ant-picker-focused {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 3px rgba(95, 200, 212, 0.15) !important;
+}
+
+.ant-radio-checked .ant-radio-inner {
+  border-color: var(--primary-color) !important;
+  background-color: var(--primary-color) !important;
+}
+
+.ant-checkbox-checked .ant-checkbox-inner {
+  background-color: var(--primary-color) !important;
+  border-color: var(--primary-color) !important;
+}
+

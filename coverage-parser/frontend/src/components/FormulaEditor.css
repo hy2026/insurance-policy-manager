@@ -1,0 +1,194 @@
+/* ==================== 主容器 ==================== */
+
+.formula-editor-card {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 20px;
+  margin: 16px 0;
+}
+
+.formula-editor-card .ant-card-body {
+  padding: 0;
+}
+
+/* ==================== 第一层：公式类型选择 ==================== */
+
+.formula-type-selector {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+/* ==================== 第二层：变量值编辑 ==================== */
+
+.formula-variables-editor {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #ffffff;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
+}
+
+.variable-input-row {
+  padding: 8px 12px;
+  border-radius: 4px;
+  transition: background-color 0.3s;
+}
+
+.variable-input-row:hover {
+  background-color: #f5f5f5;
+}
+
+.variable-label {
+  font-size: 14px;
+  color: #595959;
+  min-width: 80px;
+}
+
+.variable-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
+  min-width: 180px;
+  cursor: default;
+  transition: all 0.3s;
+  position: relative;
+}
+
+.variable-display.editable {
+  cursor: text;
+}
+
+.variable-display.editable:hover {
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+.variable-display .edit-icon {
+  color: #8c8c8c;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.3s, color 0.3s;
+  position: absolute;
+  right: 8px;
+}
+
+.variable-display.editable:hover .edit-icon {
+  opacity: 1;
+}
+
+.variable-display.editable:hover .edit-icon:hover {
+  color: #1890ff;
+}
+
+/* ==================== 公式预览和结果 ==================== */
+
+.formula-preview {
+  padding: 16px;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e6f7ff 100%);
+  border-radius: 6px;
+  border: 1px solid #91d5ff;
+}
+
+.formula-display {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+}
+
+.formula-result {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+}
+
+/* ==================== 响应式设计 ==================== */
+
+@media (max-width: 768px) {
+  .formula-editor-card {
+    padding: 12px;
+  }
+
+  .variable-input-row {
+    flex-direction: column;
+    align-items: flex-start !important;
+  }
+
+  .variable-label {
+    margin-bottom: 8px;
+  }
+
+  .variable-display,
+  .variable-input-row .ant-space {
+    width: 100% !important;
+  }
+
+  .formula-display,
+  .formula-result {
+    flex-direction: column;
+    align-items: flex-start !important;
+  }
+}
+
+/* ==================== 动画效果 ==================== */
+
+@keyframes highlight {
+  0% {
+    background-color: #e6f7ff;
+  }
+  50% {
+    background-color: #bae7ff;
+  }
+  100% {
+    background-color: #e6f7ff;
+  }
+}
+
+.variable-display.editable:focus-within {
+  animation: highlight 0.5s ease-in-out;
+}
+
+/* ==================== Ant Design 覆盖 ==================== */
+
+.formula-editor-card .ant-select-selector {
+  border-radius: 6px !important;
+  border: 2px solid #d9d9d9 !important;
+  font-weight: 500;
+}
+
+.formula-editor-card .ant-select-focused .ant-select-selector {
+  border-color: #40a9ff !important;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+}
+
+.formula-editor-card .ant-input {
+  border-radius: 4px;
+  border: 1px solid #d9d9d9;
+}
+
+.formula-editor-card .ant-input:focus,
+.formula-editor-card .ant-input-focused {
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+/* ==================== 可访问性 ==================== */
+
+.variable-display.editable:focus {
+  outline: 2px solid #1890ff;
+  outline-offset: 2px;
+}
+
+.formula-editor-card .ant-tooltip {
+  z-index: 1050;
+}
+

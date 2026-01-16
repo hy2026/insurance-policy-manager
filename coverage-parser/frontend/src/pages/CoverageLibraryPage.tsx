@@ -334,9 +334,7 @@ export default function CoverageLibraryPage() {
         {
           title: '自然语言描述',
           key: '自然语言描述',
-          ellipsis: {
-            showTitle: false,
-          },
+          width: 300,
           render: (_, record) => {
             const naturalLanguageDesc = record.naturalLanguageDesc || []
             const payoutAmount = record.payoutAmount || record.parsedResult?.payoutAmount || []
@@ -353,9 +351,13 @@ export default function CoverageLibraryPage() {
             
             const summary = descriptions.join('；')
             return (
-              <Tooltip placement="topLeft" title={summary}>
+              <div style={{ 
+                whiteSpace: 'normal', 
+                wordBreak: 'break-word',
+                lineHeight: '1.5'
+              }}>
                 {summary || '-'}
-              </Tooltip>
+              </div>
             )
           }
         },
@@ -487,9 +489,7 @@ export default function CoverageLibraryPage() {
         {
           title: '自然语言描述',
           key: '自然语言描述',
-          ellipsis: {
-            showTitle: false,
-          },
+          width: 300,
           render: (_, record) => {
             const naturalLanguageDesc = record.naturalLanguageDesc || []
             const payoutAmount = record.payoutAmount || record.parsedResult?.payoutAmount || []
@@ -506,9 +506,13 @@ export default function CoverageLibraryPage() {
             
             const summary = descriptions.join('；')
             return (
-              <Tooltip placement="topLeft" title={summary}>
+              <div style={{ 
+                whiteSpace: 'normal', 
+                wordBreak: 'break-word',
+                lineHeight: '1.5'
+              }}>
                 {summary || '-'}
-              </Tooltip>
+              </div>
             )
           }
         },
@@ -575,9 +579,7 @@ export default function CoverageLibraryPage() {
         {
           title: '自然语言描述',
           key: '自然语言描述',
-          ellipsis: {
-            showTitle: false,
-          },
+          width: 300,
           render: (_, record) => {
             const naturalLanguageDesc = record.naturalLanguageDesc || []
             const payoutAmount = record.payoutAmount || record.parsedResult?.payoutAmount || []
@@ -594,9 +596,13 @@ export default function CoverageLibraryPage() {
             
             const summary = descriptions.join('；')
             return (
-              <Tooltip placement="topLeft" title={summary}>
+              <div style={{ 
+                whiteSpace: 'normal', 
+                wordBreak: 'break-word',
+                lineHeight: '1.5'
+              }}>
                 {summary || '-'}
-              </Tooltip>
+              </div>
             )
           }
         },
@@ -653,9 +659,7 @@ export default function CoverageLibraryPage() {
         {
           title: '自然语言描述',
           key: '自然语言描述',
-          ellipsis: {
-            showTitle: false,
-          },
+          width: 300,
           render: (_, record) => {
             const naturalLanguageDesc = record.naturalLanguageDesc || []
             const payoutAmount = record.payoutAmount || record.parsedResult?.payoutAmount || []
@@ -672,9 +676,13 @@ export default function CoverageLibraryPage() {
             
             const summary = descriptions.join('；')
             return (
-              <Tooltip placement="topLeft" title={summary}>
+              <div style={{ 
+                whiteSpace: 'normal', 
+                wordBreak: 'break-word',
+                lineHeight: '1.5'
+              }}>
                 {summary || '-'}
-              </Tooltip>
+              </div>
             )
           }
         },

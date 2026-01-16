@@ -115,12 +115,23 @@ model InsuranceCoverageLibrary {
   isTrainingSample    Boolean   @default(false) // 是否作为训练样本
   annotationQuality   String?   // high/medium/low
   
+  // 快速查询字段（从parsedResult中提取，用于提升查询性能）
+  payoutCount          String?   // "1次" | "最多3次" | null (null表示一次赔付不涉及)
+  isRepeatablePayout   Boolean?  // true | false | null (null表示一次赔付不涉及)
+  isGrouped            Boolean?  // true | false | null (null表示一次赔付不涉及)
+  intervalPeriod       String?   // "间隔180日" | "" (空字符串表示无间隔期) | null
+  isPremiumWaiver      Boolean   @default(false) // 是否豁免
+  
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
   @@index([productId])
   @@index([coverageType])
   @@index([isTrainingSample, verified])
+  @@index([payoutCount])
+  @@index([isRepeatablePayout])
+  @@index([isGrouped])
+  @@index([isPremiumWaiver])
   @@map("insurance_coverage_library")
 }
 

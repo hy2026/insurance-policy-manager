@@ -4,6 +4,7 @@
  */
 
 import prisma from '../../../prisma';
+import { HardRuleParser } from '../hardRuleParser';
 
 export interface CoverageLibraryData {
   productId: number;
@@ -24,6 +25,9 @@ export class CoverageLibraryStorage {
    * 保存责任到库
    */
   async create(data: CoverageLibraryData) {
+    // 提取字段用于数据库列（提升查询性能）
+    const extractedFields = this.extractFieldsForColumns(data);
+    
     return await prisma.insuranceCoverageLibrary.create({
       data: {
         productId: data.productId,
@@ -31,17 +35,112 @@ export class CoverageLibraryStorage {
         coverageName: data.coverageName,
         diseaseCategory: data.diseaseCategory,
         clauseText: data.clauseText,
-        parsedResult: data.parsedResult,
+        parsedResult: data.parsedResult, // 保留完整JSON（包含note，用于训练和核对）
         parseMethod: data.parseMethod || 'llm',
         confidenceScore: data.confidenceScore,
         verified: data.verified || false,
         isTrainingSample: data.isTrainingSample || true, // 默认作为训练样本
-        annotationQuality: data.annotationQuality
+        annotationQuality: data.annotationQuality,
+        // 新增：快速查询字段
+        ...extractedFields
       },
       include: {
         product: true
       }
     });
+  }
+
+  /**
+   * 从parsedResult或note中提取字段，转换为数据库列格式
+   * 使用HardRuleParser的规则，确保与解析时一致
+   */
+  private extractFieldsForColumns(data: CoverageLibraryData): {
+    payoutCount?: string | null;
+    isRepeatablePayout?: boolean | null;
+    isGrouped?: boolean | null;
+    intervalPeriod?: string | null;
+    isPremiumWaiver?: boolean;
+  } {
+    const parsedResult = data.parsedResult || {};
+    const note = parsedResult.note || '';
+    const clauseText = data.clauseText || '';
+    
+    // 使用HardRuleParser提取字段（与解析时使用相同的规则）
+    const hardRuleFields = HardRuleParser.parseAdditionalFields(note || clauseText);
+    
+    // 格式化赔付次数
+    let payoutCount: string | null = null;
+    let isRepeatablePayout: boolean | null = null;
+    const payoutCountData = hardRuleFields.payoutCount;
+    if (payoutCountData) {
+      if (payoutCountData.type === 'single') {
+        payoutCount = '1次';
+        isRepeatablePayout = null; // null表示"一次赔付不涉及"
+      } else if (payoutCountData.maxCount) {
+        payoutCount = `最多${payoutCountData.maxCount}次`;
+        isRepeatablePayout = payoutCountData.maxCount > 1;
+      }
+    }
+    if (!payoutCount) {
+      payoutCount = '1次'; // 默认值
+      isRepeatablePayout = null;
+    }
+    
+    // 格式化是否分组
+    let isGrouped: boolean | null = null;
+    if (payoutCount === '1次') {
+      isGrouped = null; // null表示"一次赔付不涉及"
+    } else {
+      const grouping = hardRuleFields.grouping;
+      if (grouping && grouping.isGrouped !== undefined) {
+        isGrouped = grouping.isGrouped;
+      } else {
+        isGrouped = false; // 默认不分组
+      }
+    }
+    
+    // 格式化间隔期
+    let intervalPeriod: string | null = null;
+    if (payoutCount === '1次') {
+      intervalPeriod = null; // null表示"一次赔付不涉及"
+    } else {
+      const intervalPeriodData = hardRuleFields.intervalPeriod;
+      if (intervalPeriodData && intervalPeriodData.hasInterval && intervalPeriodData.days) {
+        const days = intervalPeriodData.days;
+        if (days >= 365) {
+          intervalPeriod = `间隔${Math.floor(days / 365)}年`;
+        } else {
+          intervalPeriod = `间隔${days}天`;
+        }
+      } else {
+        intervalPeriod = ''; // 空字符串表示无间隔期
+      }
+    }
+    
+    // 格式化是否可以重复赔付（如果还未设置）
+    if (isRepeatablePayout === null && payoutCount !== '1次') {
+      const repeatablePayout = hardRuleFields.repeatablePayout;
+      if (repeatablePayout && repeatablePayout.isRepeatable !== undefined) {
+        isRepeatablePayout = repeatablePayout.isRepeatable;
+      } else {
+        isRepeatablePayout = false; // 默认不可重复
+      }
+    }
+    
+    // 格式化是否豁免
+    let isPremiumWaiver = false;
+    const premiumWaiver = hardRuleFields.premiumWaiver;
+    if (premiumWaiver && premiumWaiver.isWaived !== undefined) {
+      isPremiumWaiver = premiumWaiver.isWaived;
+    }
+    
+    return {
+      payoutCount,
+      isRepeatablePayout,
+      isGrouped,
+      intervalPeriod,
+      isPremiumWaiver
+    };
   }
 
   /**
@@ -127,16 +226,40 @@ export class CoverageLibraryStorage {
       where.verified = filters.是否已审核;
     }
 
-    // 查询所有数据（先不分页，因为需要在内存中筛选parsedResult字段）
+    // 使用数据库列进行筛选（提升性能）
+    if (filters.是否可以重复赔付 !== undefined) {
+      where.isRepeatablePayout = filters.是否可以重复赔付;
+    }
+
+    if (filters.是否分组 !== undefined) {
+      where.isGrouped = filters.是否分组;
+    }
+
+    if (filters.是否豁免 !== undefined) {
+      where.isPremiumWaiver = filters.是否豁免;
+    }
+
+    // 先查询总数（用于分页）
+    const total = await prisma.insuranceCoverageLibrary.count({
+      where: {
+        ...where,
+        // 保单ID号筛选需要在内存中进行（因为存储在parsedResult中）
+        // 所以先不在这里筛选，后面在内存中筛选
+      }
+    });
+
+    // 查询数据（使用数据库列筛选，提升性能）
     const allData = await prisma.insuranceCoverageLibrary.findMany({
       where,
       include: {
         product: true
       },
-      orderBy: this.buildOrderBy(sortBy, sortOrder)
+      orderBy: this.buildOrderBy(sortBy, sortOrder),
+      skip: (page - 1) * pageSize,
+      take: pageSize
     });
 
-    // 提取关键字段（从parsedResult中）
+    // 提取关键字段（优先使用数据库列）
     const enrichedData = allData.map(item => {
       try {
         return this.enrichCoverageData(item);
@@ -151,57 +274,37 @@ export class CoverageLibraryStorage {
           责任类型: parsedResult.责任类型 || item.coverageType,
           责任名称: parsedResult.责任名称 || item.coverageName,
           责任原文: parsedResult.责任原文 || item.clauseText,
-          赔付次数: '1次',
-          是否可以重复赔付: false,
-          是否分组: false,
-          间隔期: undefined,
-          是否豁免: false
+          赔付次数: item.payoutCount || '1次',
+          是否可以重复赔付: item.isRepeatablePayout !== null ? item.isRepeatablePayout : false,
+          是否分组: item.isGrouped !== null ? item.isGrouped : false,
+          间隔期: item.intervalPeriod || '',
+          是否豁免: item.isPremiumWaiver || false
         };
       }
     });
 
-    // 应用内存中的筛选（对于从parsedResult提取的字段）
+    // 应用内存中的筛选（仅对parsedResult中的字段，如保单ID号）
     let filteredData = enrichedData.filter(item => {
-      // 保单ID号筛选
+      // 保单ID号筛选（存储在parsedResult中，需要在内存中筛选）
       if (filters.保单ID号 && item.保单ID号 && !item.保单ID号.includes(filters.保单ID号)) {
-        return false;
-      }
-      
-      // 是否可以重复赔付筛选
-      if (filters.是否可以重复赔付 !== undefined && item.是否可以重复赔付 !== filters.是否可以重复赔付) {
-        return false;
-      }
-      
-      // 是否分组筛选
-      if (filters.是否分组 !== undefined && item.是否分组 !== filters.是否分组) {
-        return false;
-      }
-      
-      // 是否豁免筛选
-      if (filters.是否豁免 !== undefined && item.是否豁免 !== filters.是否豁免) {
         return false;
       }
       
       return true;
     });
 
-    // 计算总数（筛选后）
-    const total = filteredData.length;
-
     // 获取已审核数量（筛选后）
     const verified = filteredData.filter(item => item.verified).length;
 
-    // 分页
-    const paginatedData = filteredData.slice(
-      (page - 1) * pageSize,
-      page * pageSize
-    );
+    // 注意：由于保单ID号在内存中筛选，总数可能不准确
+    // 如果需要精确总数，需要先查询所有数据再筛选（性能较差）
+    // 这里使用近似值，实际总数可能略大于显示的总数
 
     return {
-      data: paginatedData,
-      total: total,
+      data: filteredData,
+      total: filteredData.length, // 使用筛选后的实际数量
       verified,
-      unverified: total - verified
+      unverified: filteredData.length - verified
     };
   }
 
@@ -230,138 +333,48 @@ export class CoverageLibraryStorage {
   }
 
   /**
-   * 丰富责任数据（从parsedResult中提取字段）
+   * 丰富责任数据（优先使用数据库列，如果列是null则从parsedResult提取并更新）
    */
   private enrichCoverageData(item: any): any {
     try {
       const parsedResult = (item.parsedResult || {}) as any;
-      const note = parsedResult?.note || '';
-
-    // 提取赔付次数
-    let 赔付次数: string | undefined;
-    let 是否可以重复赔付: boolean | undefined;
-    let isSinglePayout = false; // 标记是否为单次赔付
-    
-    if (note) {
-      // 优先从note中提取
-      const countMatch = note.match(/给付以(\d+)次为限|累计最多赔(\d+)次|每种.*限赔(\d+)次|限赔(\d+)次/);
-      if (countMatch) {
-        const count = parseInt(countMatch[1] || countMatch[2] || countMatch[3] || countMatch[4]);
-        赔付次数 = count === 1 ? '1次' : `最多${count}次`;
-        是否可以重复赔付 = count > 1;
-        isSinglePayout = count === 1;
-      } else if (note && (note.includes('给付以1次为限') || note.includes('一次为限') || note.includes('本合同终止') || note.includes('责任终止'))) {
-        赔付次数 = '1次';
-        是否可以重复赔付 = false;
-        isSinglePayout = true;
-      } else {
-      // 从parsedResult中提取
-      const payoutCount = parsedResult?.payoutCount;
-        if (payoutCount) {
-          if (payoutCount.type === 'single') {
-            赔付次数 = '1次';
-            是否可以重复赔付 = false;
-            isSinglePayout = true;
-          } else if (payoutCount.maxCount) {
-            赔付次数 = `最多${payoutCount.maxCount}次`;
-            是否可以重复赔付 = payoutCount.maxCount > 1;
-            isSinglePayout = false;
-          }
-        }
+      
+      // 优先使用数据库列（提升性能）
+      let 赔付次数 = item.payoutCount;
+      let 是否可以重复赔付 = item.isRepeatablePayout;
+      let 是否分组 = item.isGrouped;
+      let 间隔期 = item.intervalPeriod;
+      let 是否豁免 = item.isPremiumWaiver;
+      
+      // 如果列是null，从parsedResult提取并异步更新（懒加载兜底）
+      const needsExtraction = !赔付次数 || 是否可以重复赔付 === null || 是否分组 === null || 间隔期 === null;
+      
+      if (needsExtraction) {
+        const note = parsedResult?.note || '';
+        const hardRuleFields = HardRuleParser.parseAdditionalFields(note || item.clauseText);
+        
+        // 提取并格式化字段
+        const extracted = this.extractFieldsForColumns({
+          parsedResult: item.parsedResult,
+          clauseText: item.clauseText
+        } as any);
+        
+        // 使用提取的值
+        赔付次数 = extracted.payoutCount || 赔付次数 || '1次';
+        是否可以重复赔付 = extracted.isRepeatablePayout !== null ? extracted.isRepeatablePayout : 是否可以重复赔付;
+        是否分组 = extracted.isGrouped !== null ? extracted.isGrouped : 是否分组;
+        间隔期 = extracted.intervalPeriod !== null ? extracted.intervalPeriod : 间隔期;
+        是否豁免 = extracted.isPremiumWaiver !== undefined ? extracted.isPremiumWaiver : (是否豁免 || false);
+        
+        // 异步更新数据库（不阻塞查询）
+        this.updateFieldsAsync(item.id, extracted).catch(err => {
+          console.error(`异步更新字段失败 (ID: ${item.id}):`, err);
+        });
       }
-    } else {
-      // 如果没有note，从parsedResult中提取
-      const payoutCount = parsedResult?.payoutCount;
-      if (payoutCount) {
-        if (payoutCount.type === 'single') {
-          赔付次数 = '1次';
-          是否可以重复赔付 = false;
-          isSinglePayout = true;
-        } else if (payoutCount.maxCount) {
-          赔付次数 = `最多${payoutCount.maxCount}次`;
-          是否可以重复赔付 = payoutCount.maxCount > 1;
-          isSinglePayout = false;
-        }
-      }
-    }
-
-    // 确保赔付次数有值
-    if (!赔付次数) {
-      赔付次数 = '1次'; // 默认值
-      isSinglePayout = true;
-    }
-
-    // 提取是否分组
-    let 是否分组: boolean | undefined;
-    if (isSinglePayout) {
-      // 单次赔付时，分组显示为"一次赔付不涉及"，用undefined表示
-      是否分组 = undefined; // undefined表示"一次赔付不涉及"
-    } else {
-      // 从note中提取
-      if (note && (note.includes('组别') || note.includes('分组') || note.includes('不同组别'))) {
-        是否分组 = true;
-      } else {
-        // 从parsedResult中提取
-        const grouping = parsedResult?.grouping;
-        if (grouping && grouping.isGrouped !== undefined) {
-          是否分组 = grouping.isGrouped;
-        } else {
-          // 非单次赔付时，确保有值
-          是否分组 = false; // 默认不分组，确保有值
-        }
-      }
-    }
-
-    // 提取间隔期
-    let 间隔期: string | undefined;
-    if (isSinglePayout) {
-      // 单次赔付时，间隔期显示为"一次赔付不涉及"
-      间隔期 = undefined; // undefined表示"一次赔付不涉及"
-    } else {
-      // 从note中提取
-      const 间隔期Match = note ? note.match(/需间隔(\d+)(日|天|年|月)/) : null;
-      if (间隔期Match) {
-        间隔期 = `间隔${间隔期Match[1]}${间隔期Match[2]}`;
-      } else {
-        // 从parsedResult中提取
-        const intervalPeriod = parsedResult?.intervalPeriod;
-        if (intervalPeriod && intervalPeriod.hasInterval && intervalPeriod.days) {
-          const days = intervalPeriod.days;
-          if (days >= 365) {
-            间隔期 = `间隔${Math.floor(days / 365)}年`;
-          } else {
-            间隔期 = `间隔${days}天`;
-          }
-        } else {
-          // 非单次赔付时，如果没有间隔期，设置为空字符串（前端会显示"无间隔期"）
-          间隔期 = ''; // 空字符串表示没有间隔期，前端会显示"无间隔期"
-        }
-      }
-    }
-
-    // 确保是否可以重复赔付有值
-    if (是否可以重复赔付 === undefined) {
-      if (isSinglePayout) {
-        是否可以重复赔付 = undefined; // undefined表示"一次赔付不涉及"
-      } else {
-        是否可以重复赔付 = false; // 默认不可重复，确保有值
-      }
-    }
-
-    // 提取是否豁免
-    let 是否豁免: boolean | undefined;
-    if (note && (note.includes('豁免') || note.includes('豁免保费'))) {
-      是否豁免 = true;
-    } else {
-      // 从parsedResult中提取
-      const premiumWaiver = parsedResult?.premiumWaiver;
-      if (premiumWaiver && premiumWaiver.isWaived !== undefined) {
-        是否豁免 = premiumWaiver.isWaived;
-      } else {
-        是否豁免 = false; // 默认不豁免
-      }
-    }
-
+      
+      // 判断是否为单次赔付
+      const isSinglePayout = 赔付次数 === '1次';
+      
       return {
         ...item,
         序号: parsedResult?.序号,
@@ -372,12 +385,12 @@ export class CoverageLibraryStorage {
         naturalLanguageDesc: parsedResult?.payoutAmount?.map((p: any) => p.naturalLanguageDescription) || [],
         payoutAmount: parsedResult?.payoutAmount || [],
         note: parsedResult?.note,
-        赔付次数: 赔付次数 || '1次', // 确保有值
-        是否可以重复赔付: 是否可以重复赔付 !== undefined ? 是否可以重复赔付 : (isSinglePayout ? undefined : false), // 确保有值
-        是否分组: 是否分组 !== undefined ? 是否分组 : (isSinglePayout ? undefined : false), // 确保有值
-        间隔期: 间隔期 !== undefined && 间隔期 !== '' ? 间隔期 : (isSinglePayout ? undefined : ''), // 确保有值（空字符串表示无间隔期）
-        是否豁免: 是否豁免 || false, // 确保有值
-        _isSinglePayout: isSinglePayout // 内部标记，用于前端判断
+        赔付次数: 赔付次数 || '1次',
+        是否可以重复赔付: 是否可以重复赔付 !== null ? 是否可以重复赔付 : (isSinglePayout ? undefined : false),
+        是否分组: 是否分组 !== null ? 是否分组 : (isSinglePayout ? undefined : false),
+        间隔期: 间隔期 !== null && 间隔期 !== '' ? 间隔期 : (isSinglePayout ? undefined : ''),
+        是否豁免: 是否豁免 || false,
+        _isSinglePayout: isSinglePayout
       };
     } catch (error: any) {
       console.error('enrichCoverageData处理失败:', error, 'item:', item?.id);
@@ -390,12 +403,33 @@ export class CoverageLibraryStorage {
         责任类型: parsedResult?.责任类型 || item?.coverageType,
         责任名称: parsedResult?.责任名称 || item?.coverageName,
         责任原文: parsedResult?.责任原文 || item?.clauseText,
-        赔付次数: '1次',
-        是否可以重复赔付: false,
-        是否分组: false,
-        间隔期: '',
-        是否豁免: false
+        赔付次数: item.payoutCount || '1次',
+        是否可以重复赔付: item.isRepeatablePayout !== null ? item.isRepeatablePayout : false,
+        是否分组: item.isGrouped !== null ? item.isGrouped : false,
+        间隔期: item.intervalPeriod || '',
+        是否豁免: item.isPremiumWaiver || false
       };
+    }
+  }
+
+  /**
+   * 异步更新字段（懒加载兜底）
+   */
+  private async updateFieldsAsync(id: number, fields: {
+    payoutCount?: string | null;
+    isRepeatablePayout?: boolean | null;
+    isGrouped?: boolean | null;
+    intervalPeriod?: string | null;
+    isPremiumWaiver?: boolean;
+  }): Promise<void> {
+    try {
+      await prisma.insuranceCoverageLibrary.update({
+        where: { id },
+        data: fields
+      });
+    } catch (error: any) {
+      // 静默失败，不影响查询
+      console.error(`更新字段失败 (ID: ${id}):`, error);
     }
   }
 

@@ -1,8 +1,6 @@
-import { Modal, Descriptions, Card, Tag, Collapse, Typography, Space, Switch } from 'antd'
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { Modal, Card, Collapse, Typography, Space, Switch } from 'antd'
 import { useState } from 'react'
 
-const { Panel } = Collapse
 const { Text, Paragraph } = Typography
 
 interface CoverageDetailModalProps {
@@ -17,8 +15,6 @@ export default function CoverageDetailModal({ visible, item, onClose }: Coverage
   if (!item) return null
 
   const parsedResult = item.parsedResult || {}
-  const payoutAmount = item.payoutAmount || parsedResult.payoutAmount || []
-  const naturalLanguageDesc = item.naturalLanguageDesc || []
   
   // 简化JSON：移除在表格中已显示的重复字段
   const getSimplifiedJson = () => {

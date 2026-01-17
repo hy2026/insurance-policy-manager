@@ -1,5 +1,5 @@
 import { Card, List, Tag, Button, Space, Popconfirm, Typography, Empty } from 'antd'
-import { EditOutlined, DeleteOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { Coverage } from '@/types'
 
 const { Text } = Typography
@@ -8,10 +8,9 @@ interface Props {
   coverages: Coverage[]
   onEdit?: (coverage: Coverage, index: number) => void
   onDelete?: (index: number) => void
-  onSelect?: (coverage: Coverage, index: number) => void
 }
 
-export default function CoverageList({ coverages, onEdit, onDelete, onSelect }: Props) {
+export default function CoverageList({ coverages, onEdit, onDelete }: Props) {
   if (coverages.length === 0) {
     return (
       <Empty
@@ -77,8 +76,8 @@ export default function CoverageList({ coverages, onEdit, onDelete, onSelect }: 
 
           {/* 解析信息 */}
           <Space style={{ marginBottom: 12 }}>
-            <Tag color={coverage.result.overallConfidence >= 0.8 ? 'success' : 'warning'}>
-                    置信度: {(coverage.result.overallConfidence * 100).toFixed(0)}%
+            <Tag color={(coverage.result.overallConfidence ?? 0) >= 0.8 ? 'success' : 'warning'}>
+                    置信度: {((coverage.result.overallConfidence ?? 0) * 100).toFixed(0)}%
             </Tag>
             <Tag color="blue">
               {coverage.result.parseMethod === 'llm' ? 'AI解析' : '规则解析'}

@@ -20,7 +20,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const menuItems = [
+  const menuItems: any[] = [
     {
       key: '/',
       icon: <HomeOutlined />,
@@ -42,7 +42,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       label: '家庭保障诊断',
     },
     {
-      type: 'divider',
+      type: 'divider' as const,
     },
     {
       key: '/products',

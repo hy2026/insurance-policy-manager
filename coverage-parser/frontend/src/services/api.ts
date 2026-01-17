@@ -45,17 +45,17 @@ export async function parseCoverage(
   coverageType: string,
   policyInfo?: PolicyInfo
 ): Promise<ParseResult> {
-  const response = await api.post<any>('/parse', {
+  const response: any = await api.post('/parse', {
     clauseText,
     coverageType,
     policyInfo,
   })
   // 后端返回格式: { success: boolean, result?: any, message?: string }
   // 响应拦截器已经返回了response.data，所以response就是后端返回的对象
-  if (response.success && response.result) {
+  if (response && response.success && response.result) {
     return response.result as ParseResult
   }
-  throw new Error(response.message || '解析失败')
+  throw new Error(response?.message || '解析失败')
 }
 
 /**
@@ -65,11 +65,11 @@ export async function recalculateTier(
   tier: PayoutTier,
   policyInfo: PolicyInfo
 ): Promise<KeyAmount[]> {
-  const response = await api.post<ApiResponse<{ keyAmounts: KeyAmount[] }>>('/coverage/recalculate', {
+  const response: any = await api.post('/coverage/recalculate', {
     tier,
     policyInfo,
   })
-  return response.data!.keyAmounts
+  return response.data?.keyAmounts || []
 }
 
 // ==================== 保单相关API ====================
@@ -79,7 +79,7 @@ export async function recalculateTier(
  * 注意：需要传入userId参数（暂时用默认值1）
  */
 export async function getPolicies(userId: number = 1): Promise<Policy[]> {
-  const response = await api.get<ApiResponse<Policy[]>>('/policies', {
+  const response: any = await api.get('/policies', {
     params: { userId }
   })
   return response.data || []
@@ -89,7 +89,7 @@ export async function getPolicies(userId: number = 1): Promise<Policy[]> {
  * 根据ID获取保单
  */
 export async function getPolicyById(id: number): Promise<Policy> {
-  const response = await api.get<ApiResponse<Policy>>(`/policies/${id}`)
+  const response: any = await api.get(`/policies/${id}`)
   return response.data!
 }
 
@@ -97,7 +97,7 @@ export async function getPolicyById(id: number): Promise<Policy> {
  * 创建保单
  */
 export async function createPolicy(policy: Omit<Policy, 'id' | 'createdAt' | 'updatedAt'>): Promise<Policy> {
-  const response = await api.post<ApiResponse<Policy>>('/policies', policy)
+  const response: any = await api.post('/policies', policy)
   return response.data!
 }
 
@@ -105,7 +105,7 @@ export async function createPolicy(policy: Omit<Policy, 'id' | 'createdAt' | 'up
  * 更新保单
  */
 export async function updatePolicy(id: number, policy: Partial<Policy>): Promise<Policy> {
-  const response = await api.put<ApiResponse<Policy>>(`/policies/${id}`, policy)
+  const response: any = await api.put(`/policies/${id}`, policy)
   return response.data!
 }
 
@@ -127,7 +127,7 @@ export const removePolicy = deletePolicy
  * 获取所有产品
  */
 export async function getProducts(): Promise<InsuranceProduct[]> {
-  const response = await api.get<ApiResponse<InsuranceProduct[]>>('/products')
+  const response: any = await api.get('/products')
   return response.data || []
 }
 
@@ -135,7 +135,7 @@ export async function getProducts(): Promise<InsuranceProduct[]> {
  * 根据ID获取产品
  */
 export async function getProductById(id: number): Promise<InsuranceProduct> {
-  const response = await api.get<ApiResponse<InsuranceProduct>>(`/products/${id}`)
+  const response: any = await api.get(`/products/${id}`)
   return response.data!
 }
 
@@ -143,7 +143,7 @@ export async function getProductById(id: number): Promise<InsuranceProduct> {
  * 创建产品
  */
 export async function createProduct(product: Omit<InsuranceProduct, 'id' | 'createdAt' | 'updatedAt'>): Promise<InsuranceProduct> {
-  const response = await api.post<ApiResponse<InsuranceProduct>>('/products', product)
+  const response: any = await api.post('/products', product)
   return response.data!
 }
 
@@ -151,7 +151,7 @@ export async function createProduct(product: Omit<InsuranceProduct, 'id' | 'crea
  * 更新产品
  */
 export async function updateProduct(id: number, product: Partial<InsuranceProduct>): Promise<InsuranceProduct> {
-  const response = await api.put<ApiResponse<InsuranceProduct>>(`/products/${id}`, product)
+  const response: any = await api.put(`/products/${id}`, product)
   return response.data!
 }
 
@@ -173,11 +173,7 @@ export async function saveCoveragesToLibrary(data: {
   policyType: string
   coverages: any[]
 }): Promise<{ productId: number; coverageIds: number[]; count: number }> {
-  const response = await api.post<ApiResponse<{
-    productId: number
-    coverageIds: number[]
-    count: number
-  }>>('/coverage-library/save', data)
+  const response: any = await api.post('/coverage-library/save', data)
   return response.data!
 }
 
@@ -243,11 +239,7 @@ export async function importCoverageLibrary(data: {
   cases: any[]
   batchInfo?: any
 }): Promise<{ count: number; success: number; failed: number }> {
-  const response = await api.post<ApiResponse<{
-    count: number
-    success: number
-    failed: number
-  }>>('/coverage-library/import', data)
+  const response: any = await api.post('/coverage-library/import', data)
   return response.data!
 }
 
@@ -285,7 +277,7 @@ export async function exportCoverageLibrary(filters?: any): Promise<void> {
  * 标记责任为已验证
  */
 export async function verifyCoverage(id: number, verifiedBy: string): Promise<any> {
-  const response = await api.post<ApiResponse<any>>(`/coverage-library/${id}/verify`, {
+  const response: any = await api.post(`/coverage-library/${id}/verify`, {
     verifiedBy
   })
   return response.data!
@@ -338,7 +330,7 @@ export async function getTrainingData(filters?: {
   verified?: boolean
   coverageType?: string
 }): Promise<TrainingData[]> {
-  const response = await api.get<ApiResponse<TrainingData[]>>('/training/data', {
+  const response: any = await api.get('/training/data', {
     params: filters,
   })
   return response.data || []
@@ -348,7 +340,7 @@ export async function getTrainingData(filters?: {
  * 标记数据为已验证
  */
 export async function verifyTrainingData(id: number, verifiedBy: string): Promise<TrainingData> {
-  const response = await api.post<ApiResponse<TrainingData>>(`/training/data/${id}/verify`, {
+  const response: any = await api.post(`/training/data/${id}/verify`, {
     verifiedBy,
   })
   return response.data!
@@ -358,7 +350,7 @@ export async function verifyTrainingData(id: number, verifiedBy: string): Promis
  * 导出训练数据
  */
 export async function exportTrainingData(): Promise<{ filePath: string; totalSamples: number }> {
-  const response = await api.post<ApiResponse<{ filePath: string; totalSamples: number }>>('/training/export')
+  const response: any = await api.post('/training/export')
   return response.data!
 }
 
@@ -366,8 +358,8 @@ export async function exportTrainingData(): Promise<{ filePath: string; totalSam
  * 健康检查
  */
 export async function healthCheck(): Promise<{ status: string }> {
-  const response = await api.get<{ status: string }>('/health')
-  return response
+  const response: any = await api.get('/health')
+  return response.data || response
 }
 
 export default api

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Modal, message } from 'antd'
-import { PlusOutlined, DatabaseOutlined } from '@ant-design/icons'
 import { getPolicies, removePolicy } from '@/services/api'
 import type { Policy } from '@/types'
 

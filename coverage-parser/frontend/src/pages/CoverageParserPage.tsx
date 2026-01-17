@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Card, Form, Input, Select, InputNumber, Button, message, Spin, Divider, Space, Tag, Typography, Radio, Collapse, Modal, Row, Col } from 'antd'
-import { ThunderboltOutlined, SaveOutlined, ClearOutlined, EditOutlined } from '@ant-design/icons'
+import { Card, Form, Input, Select, Button, message, Spin, Divider, Space, Tag, Typography, Radio, Collapse, Modal, Row, Col } from 'antd'
+import { ThunderboltOutlined, SaveOutlined, ClearOutlined } from '@ant-design/icons'
 import { parseCoverage, saveCoveragesToLibrary } from '@/services/api'
 import type { ParseResult, PolicyInfo, Coverage } from '@/types'
 import ParseResultDisplay from '@/components/ParseResultDisplay'

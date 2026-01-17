@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { 
   Table, 
   Card, 
@@ -23,8 +22,7 @@ import {
   ImportOutlined,
   EyeOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
-  ArrowLeftOutlined
+  CloseCircleOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import CoverageDetailModal from '../components/CoverageDetailModal'
@@ -54,7 +52,6 @@ interface CoverageItem {
 }
 
 export default function CoverageLibraryPage() {
-  const navigate = useNavigate()
   const [data, setData] = useState<CoverageItem[]>([])
   const [loading, setLoading] = useState(false)
   const [total, setTotal] = useState(0)

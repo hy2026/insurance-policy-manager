@@ -125,9 +125,22 @@ export const removePolicy = deletePolicy
 /**
  * 获取所有产品
  */
-export async function getProducts(): Promise<InsuranceProduct[]> {
-  const response: any = await api.get('/products')
-  return response.data || []
+export async function getProducts(params?: {
+  page?: number
+  pageSize?: number
+  [key: string]: any
+}): Promise<{ data: InsuranceProduct[], total: number, byCategory?: any }> {
+  // 注意：响应拦截器已经返回了response.data，所以response就是后端返回的对象
+  const response: any = await api.get('/products', { params })
+  // response 已经是 { success: true, data: [...], total: ..., byCategory: ... }
+  if (response && response.success) {
+    return {
+      data: response.data || [],
+      total: response.total || 0,
+      byCategory: response.byCategory || {}
+    }
+  }
+  return { data: [], total: 0 }
 }
 
 /**
@@ -159,6 +172,36 @@ export async function updateProduct(id: number, product: Partial<InsuranceProduc
  */
 export async function deleteProduct(id: number): Promise<void> {
   await api.delete(`/products/${id}`)
+}
+
+/**
+ * 导入产品Excel文件
+ */
+export async function importProducts(file: File): Promise<{ success: boolean; message: string; count: number }> {
+  const formData = new FormData()
+  formData.append('file', file)
+  
+  const response: any = await axios.post('/api/products/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    timeout: 180000
+  })
+  
+  return response.data
+}
+
+/**
+ * 导出产品数据为Excel
+ */
+export async function exportProducts(): Promise<void> {
+  // 创建一个临时的a标签来触发下载
+  const link = document.createElement('a')
+  link.href = `/api/products/export?t=${Date.now()}`
+  link.download = `保险产品库导出-${Date.now()}.xlsx`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
 }
 
 // ==================== 责任库相关API ====================
@@ -358,6 +401,38 @@ export async function exportTrainingData(): Promise<{ filePath: string; totalSam
  */
 export async function healthCheck(): Promise<{ status: string }> {
   const response: any = await api.get('/health')
+  return response.data || response
+}
+
+// ==================== 审核相关API（新）====================
+
+/**
+ * 审核责任（通过/不通过）
+ */
+export async function reviewCoverage(
+  id: number,
+  reviewData: {
+    reviewStatus: 'approved' | 'rejected'
+    reviewNotes?: string
+    reviewedBy: string
+  }
+): Promise<any> {
+  const response: any = await api.post(`/coverage-library/${id}/review`, reviewData)
+  return response.data || response
+}
+
+/**
+ * 审核产品（通过/不通过）
+ */
+export async function reviewProduct(
+  id: number,
+  reviewData: {
+    reviewStatus: 'approved' | 'rejected'
+    reviewNotes?: string
+    reviewedBy: string
+  }
+): Promise<any> {
+  const response: any = await api.post(`/products/${id}/review`, reviewData)
   return response.data || response
 }
 

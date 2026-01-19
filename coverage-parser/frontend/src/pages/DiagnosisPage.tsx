@@ -20,7 +20,7 @@ export default function DiagnosisPage() {
             color: '#1f2937',
             margin: 0
           }}>
-            家庭保障诊断
+            家庭保障体检
           </h1>
           <p style={{
             fontSize: '14px',

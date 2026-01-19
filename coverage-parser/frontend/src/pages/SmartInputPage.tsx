@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { message, Modal } from 'antd'
-import { parseCoverage, addPolicy, editPolicy, getPolicyById } from '@/services/api'
+import { parseCoverage, addPolicy, editPolicy, getPolicyById, getProducts, getCoverageLibrary } from '@/services/api'
 import type { Coverage, PolicyInfo } from '@/types'
 import InsuranceCompanySelector from '@/components/InsuranceCompanySelector'
 
@@ -102,8 +102,8 @@ function ExtractedTextDisplay({ extractedText }: { extractedText?: string | stri
         color: '#999',
         lineHeight: '1.6'
       }}>
-        <div style={{ fontWeight: '600', color: '#999', marginBottom: '4px' }}>📄 原文片段：</div>
-        <div style={{ fontStyle: 'italic' }}>原文未识别到相关内容</div>
+        <span style={{ fontWeight: '600', color: '#999' }}>📄 原文片段：</span>
+        <span style={{ fontStyle: 'italic', marginLeft: '6px' }}>原文未识别到相关内容</span>
       </div>
     )
   }
@@ -201,8 +201,8 @@ function ExtractedTextDisplay({ extractedText }: { extractedText?: string | stri
       color: '#555',
       lineHeight: '1.6'
     }}>
-      <div style={{ fontWeight: '600', color: '#01BCD6', marginBottom: '4px' }}>📄 原文片段：</div>
-      <div style={{ wordBreak: 'break-word' }}>
+      <span style={{ fontWeight: '600', color: '#01BCD6' }}>📄 原文片段：</span>
+      <span style={{ wordBreak: 'break-word', marginLeft: '6px' }}>
         {displayText}
         {hasMore && (
           <span
@@ -219,7 +219,7 @@ function ExtractedTextDisplay({ extractedText }: { extractedText?: string | stri
             {expanded ? '收起' : '查看完整'}
           </span>
         )}
-      </div>
+      </span>
     </div>
   )
 }
@@ -258,11 +258,21 @@ function OtherFieldDisplay({
                         confidence >= 0.5 ? '中' : '低'
   const extractedText = typeof data === 'object' ? data?.extractedText : undefined
 
+  // 统一的图标映射
+  const iconMap: { [key: string]: string } = {
+    '赔付次数': '🔢',
+    '是否分组': '📂',
+    '是否可以重复赔付': '🔄',
+    '间隔期': '⏱️',
+    '疾病发生是否豁免保费': '🎁'
+  }
+  const icon = iconMap[title] || '📋'
+
   return (
     <div style={{
       marginTop: '16px',
-      padding: '16px',
-      background: 'white',
+      padding: '20px',
+      background: '#f8fdfe',
       borderRadius: '8px',
       border: '2px solid #CAF4F7'
     }}>
@@ -272,9 +282,9 @@ function OtherFieldDisplay({
         alignItems: 'center',
         marginBottom: '12px'
       }}>
-        <span style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
-          {title}
-        </span>
+        <h3 style={{ fontSize: '16px', fontWeight: '600', color: '#333', margin: 0 }}>
+          {icon} {title}
+        </h3>
         <span style={{
           padding: '4px 12px',
           borderRadius: '12px',
@@ -389,9 +399,9 @@ function TierDisplay({
         }
       } else if (formulaType === 'fixed') {
         // 固定金额：从公式中提取倍数
-        // 例如："基本保额×150%" 或 "基本保额×1.5"
+        // 例如："基本保额×150%"、"基本保额*150%" 或 "基本保额×1.5"
         const percentMatch = formula.match(/(\d+(?:\.\d+)?)%/)
-        const ratioMatch = formula.match(/×\s*(\d+(?:\.\d+)?)(?!%)/)
+        const ratioMatch = formula.match(/[×*]\s*(\d+(?:\.\d+)?)(?!%)/)
         
         if (percentMatch) {
           const percent = parseFloat(percentMatch[1])
@@ -458,15 +468,19 @@ function TierDisplay({
       boxShadow: '0 2px 4px rgba(0,0,0,0.08)',
       position: 'relative'
     }}>
-      {/* 删除按钮 - 固定在右上角 */}
+      {/* 删除按钮 - 固定在右上角（橙色） */}
       {onDelete && totalTiers && totalTiers > 1 && (
         <button
-          onClick={() => onDelete(index)}
+          onClick={() => {
+            if (confirm('确定要删除此阶段吗？')) {
+              onDelete(index)
+            }
+          }}
           style={{
             position: 'absolute',
             top: '16px',
             right: '16px',
-            background: '#ff4d4f',
+            background: '#FF7A5C',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
@@ -477,7 +491,7 @@ function TierDisplay({
             zIndex: 10
           }}
         >
-          删除
+          🗑️ 删除阶段
         </button>
       )}
       
@@ -535,32 +549,30 @@ function TierDisplay({
               }}>
                 {tier.formula || '未设置公式'}
               </div>
-              <button
-                onClick={() => setShowFormulaEditor(!showFormulaEditor)}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '2px',
-                  padding: '4px 10px',
-                  fontSize: '11px',
-                  background: 'transparent',
-                  border: 'none',
-                  color: showFormulaEditor ? '#4caf50' : '#0366d6',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#e6f3ff';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                }}
-                title={showFormulaEditor ? '收起编辑器' : '修改公式'}
-              >
-                <span style={{ fontSize: '16px' }}>{showFormulaEditor ? '✓' : '✏️'}</span>
-                <span>{showFormulaEditor ? '完成' : '编辑'}</span>
-              </button>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button
+                  onClick={() => setShowFormulaEditor(!showFormulaEditor)}
+                  style={{
+                    fontSize: '13px',
+                    padding: '5px 14px',
+                    fontWeight: '500',
+                    background: '#01BCD6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#00A8C0'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#01BCD6'
+                  }}
+                >
+                  {showFormulaEditor ? '完成' : '编辑'}
+                </button>
+              </div>
             </div>
             
             {/* 公式编辑器（可展开/收起） */}
@@ -1039,6 +1051,7 @@ export default function SmartInputPage() {
   const maxStartYear = 2026 // 投保开始年份最大为2026年
   const defaultBirthYear = 2000
   
+  const [productIdNumber, setProductIdNumber] = useState('') // 保险产品ID号
   const [insuranceCompany, setInsuranceCompany] = useState('')
   const [policyType, setPolicyType] = useState('critical_illness')
   const [productName, setProductName] = useState('')
@@ -1061,6 +1074,7 @@ export default function SmartInputPage() {
   const [loading, setLoading] = useState(false)
   const [parseResult, setParseResult] = useState<any>(null)
   const [policyInfoChanged, setPolicyInfoChanged] = useState(false) // 跟踪基础信息是否已修改
+  const [showCoverageInput, setShowCoverageInput] = useState(false) // 控制责任分析区域的显示
 
   // 如果是编辑模式，加载数据
   useEffect(() => {
@@ -1206,8 +1220,17 @@ export default function SmartInputPage() {
           setTotalPaymentPeriod('')
         }
         
-        setAnnualPremium((policy.annualPremium || policy.policyInfo?.annualPremium || 0).toString())
-        setBasicSumInsured(((policy.basicSumInsured || policy.policyInfo?.basicSumInsured || 0) / 10000).toString())
+        const loadedAnnualPremiumValue = (policy.annualPremium || policy.policyInfo?.annualPremium || 0)
+        const loadedBasicSumInsuredValue = (policy.basicSumInsured || policy.policyInfo?.basicSumInsured || 0) / 10000
+        
+        console.log('[loadPolicyData] 从数据库加载:')
+        console.log(`  policy.annualPremium = ${policy.annualPremium}`)
+        console.log(`  policy.basicSumInsured = ${policy.basicSumInsured}`)
+        console.log(`  将要设置 annualPremium = ${loadedAnnualPremiumValue}`)
+        console.log(`  将要设置 basicSumInsured = ${loadedBasicSumInsuredValue}万`)
+        
+        setAnnualPremium(loadedAnnualPremiumValue.toString())
+        setBasicSumInsured(loadedBasicSumInsuredValue.toString())
         
         // 设置责任列表
         const coverages = policy.coverages || []
@@ -1273,6 +1296,386 @@ export default function SmartInputPage() {
   const endYears = generateYears(new Date().getFullYear(), new Date().getFullYear() + 100)
 
   // 分析责任
+  // 删除责任
+  const handleDeleteCoverage = (index: number) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '确定要删除这个责任吗？',
+      onOk: () => {
+        setCoverages(coverages.filter((_, i) => i !== index))
+        message.success('删除成功')
+      }
+    })
+  }
+  
+  // 🔑 统一的理赔金额计算函数（提取自保存责任逻辑）
+  const calculateKeyAmounts = (
+    parseResult: any,
+    policyInfo: {
+      birthYear: number
+      policyStartYear: number
+      coverageEndYear: number | 'lifetime'
+      basicSumInsured: number  // 单位：元
+      annualPremium?: number
+      totalPaymentPeriod?: string | number
+    }
+  ) => {
+    // 🔑 兼容两种数据格式：
+    // 格式1（新格式）: payoutAmount.details.tiers
+    // 格式2（责任库格式）: payoutAmount 是数组
+    let tiers: any[] = []
+    
+    if (parseResult?.payoutAmount?.details?.tiers) {
+      // 格式1：新格式
+      tiers = parseResult.payoutAmount.details.tiers
+    } else if (Array.isArray(parseResult?.payoutAmount)) {
+      // 格式2：责任库格式，payoutAmount 直接是数组
+      tiers = parseResult.payoutAmount
+      console.log('[calculateKeyAmounts] 检测到责任库格式，tiers:', tiers)
+    } else {
+      console.log('[calculateKeyAmounts] 无法识别的数据格式，返回原数据')
+      return parseResult
+    }
+    
+    if (tiers.length === 0) {
+      console.log('[calculateKeyAmounts] tiers 为空，返回原数据')
+      return parseResult
+    }
+    
+    const policyStartAge = policyInfo.policyStartYear - policyInfo.birthYear
+    const basicSumInsuredWan = policyInfo.basicSumInsured / 10000
+    
+    console.log(`[calculateKeyAmounts] policyInfo.basicSumInsured (元) = ${policyInfo.basicSumInsured}`)
+    console.log(`[calculateKeyAmounts] basicSumInsuredWan (万) = ${basicSumInsuredWan}`)
+    
+    // 遍历所有阶段，重新计算 keyAmounts
+    const recalculatedTiers = tiers.map((tier: any, tierIndex: number) => {
+      // 🔑 对于责任库格式，需要推算年龄范围
+      let actualStartAge = tier.startAge ?? tier.keyAmounts?.[0]?.age
+      let actualEndAge = tier.endAge ?? tier.keyAmounts?.[tier.keyAmounts?.length - 1]?.age
+      
+      // 如果没有年龄信息，使用投保年龄到保障结束年龄
+      if (!actualStartAge) {
+        actualStartAge = policyStartAge
+      }
+      if (!actualEndAge) {
+        actualEndAge = policyInfo.coverageEndYear === 'lifetime' ? 100 : policyInfo.coverageEndYear - policyInfo.birthYear
+      }
+      
+      // 如果没有公式，跳过
+      if (!tier.formula) {
+        console.log(`[计算金额] 阶段${tierIndex + 1}: 跳过（缺少公式）`)
+        return tier
+      }
+      
+      const currentStartAge = parseInt(actualStartAge.toString())
+      const currentEndAge = parseInt(actualEndAge.toString())
+      const formula = tier.formula || ''
+      const formulaType = tier.formulaType || 'fixed'
+      const interestRate = parseFloat(tier.interestRate?.toString() || '0') / 100
+      
+      console.log(`[calculateKeyAmounts] 阶段${tierIndex + 1}: ${currentStartAge}-${currentEndAge}岁, 公式:${formula}`)
+      
+      const newKeyAmounts: any[] = []
+      
+      for (let age = currentStartAge; age <= currentEndAge; age++) {
+        const year = policyInfo.birthYear + age
+        const n = age - policyStartAge
+        let amount = 0
+        
+        if (formulaType === 'compound') {
+          amount = basicSumInsuredWan * Math.pow(1 + interestRate, n)
+        } else if (formulaType === 'simple') {
+          amount = basicSumInsuredWan * (1 + interestRate * n)
+        } else if (formulaType === 'fixed') {
+          const percentMatch = formula.match(/(\d+(?:\.\d+)?)%/)
+          const ratioMatch = formula.match(/[×*]\s*(\d+(?:\.\d+)?)(?!%)/)
+          
+          if (percentMatch) {
+            const percent = parseFloat(percentMatch[1])
+            amount = basicSumInsuredWan * (percent / 100)
+            console.log(`[金额计算] 百分比计算: ${basicSumInsuredWan}万 * ${percent}% = ${amount}万`)
+          } else if (ratioMatch) {
+            const ratio = parseFloat(ratioMatch[1])
+            amount = basicSumInsuredWan * ratio
+            console.log(`[金额计算] 倍数计算: ${basicSumInsuredWan}万 * ${ratio} = ${amount}万`)
+          } else {
+            amount = basicSumInsuredWan
+            console.log(`[金额计算] 默认100%: ${amount}万`)
+          }
+        } else {
+          amount = basicSumInsuredWan
+        }
+        
+        newKeyAmounts.push({
+          year,
+          age,
+          amount: parseFloat(amount.toFixed(1))
+        })
+      }
+      
+      console.log(`[calculateKeyAmounts] 阶段${tierIndex + 1}: 计算完成，共${newKeyAmounts.length}个金额，前3个:`, newKeyAmounts.slice(0, 3))
+      
+      return {
+        ...tier,
+        startAge: currentStartAge,
+        endAge: currentEndAge,
+        keyAmounts: newKeyAmounts
+      }
+    })
+    
+    // 🔑 根据输入格式返回对应的格式
+    if (Array.isArray(parseResult?.payoutAmount)) {
+      // 格式2：责任库格式，保持数组格式但转换为新格式（兼容显示逻辑）
+      return {
+        ...parseResult,
+        payoutAmount: {
+          details: {
+            tiers: recalculatedTiers
+          }
+        }
+      }
+    } else {
+      // 格式1：新格式
+      return {
+        ...parseResult,
+        payoutAmount: {
+          ...parseResult.payoutAmount,
+          details: {
+            ...parseResult.payoutAmount.details,
+            tiers: recalculatedTiers
+          }
+        }
+      }
+    }
+  }
+  
+  // 检查是否填写了计算所需的必要信息
+  const hasRequiredPolicyInfo = () => {
+    const basicSumInsuredValue = parseFloat(basicSumInsured)
+    // 基本保额至少要10万，避免输入"1"或"10"时误触发计算
+    const isValidBasicSum = basicSumInsured && basicSumInsured.trim() !== '' && basicSumInsuredValue >= 10
+    
+    return !!(
+      birthYear && birthYear.trim() !== '' &&
+      policyStartYear && policyStartYear.trim() !== '' &&
+      coverageEndYear && coverageEndYear.trim() !== '' &&
+      isValidBasicSum
+    )
+  }
+  
+  // 🎨 获取字段高亮样式（当有产品库责任但字段未填时）
+  const getFieldHighlightStyle = (fieldValue: string) => {
+    const hasLibraryCoverages = coverages.some(c => c.source === 'library')
+    const isEmpty = !fieldValue || fieldValue.trim() === ''
+    
+    if (hasLibraryCoverages && isEmpty) {
+      return {
+        border: '2px solid #01BCD6',
+        background: 'transparent',
+        boxShadow: '0 4px 12px rgba(1, 188, 214, 0.15), 0 0 0 4px rgba(1, 188, 214, 0.08)'
+      }
+    }
+    return {}
+  }
+  
+  // 获取保单信息对象
+  const getPolicyInfo = () => {
+    const basicSumInsuredValue = parseFloat(basicSumInsured) * 10000
+    console.log(`[getPolicyInfo] 输入的基本保额 = ${basicSumInsured}万，转换为元 = ${basicSumInsuredValue}`)
+    return {
+      birthYear: parseInt(birthYear),
+      policyStartYear: parseInt(policyStartYear),
+      coverageEndYear: coverageEndYear === 'lifetime' ? 'lifetime' : parseInt(coverageEndYear),
+      basicSumInsured: basicSumInsuredValue,
+      annualPremium: annualPremium ? parseFloat(annualPremium) : undefined,
+      totalPaymentPeriod: totalPaymentPeriod === 'lifetime' ? 'lifetime' : totalPaymentPeriod ? parseInt(totalPaymentPeriod) : undefined
+    }
+  }
+  
+  // 🔑 手动计算理赔金额
+  const handleManualCalculate = () => {
+    console.log('[手动计算] 开始计算理赔金额')
+    
+    // 验证必填字段
+    if (!birthYear || !birthYear.trim()) {
+      message.error('请填写出生年份')
+      return
+    }
+    if (!policyStartYear || !policyStartYear.trim()) {
+      message.error('请填写投保开始年份')
+      return
+    }
+    if (!coverageEndYear || !coverageEndYear.trim()) {
+      message.error('请填写保障结束年份')
+      return
+    }
+    if (!basicSumInsured || !basicSumInsured.trim()) {
+      message.error('请填写基本保额')
+      return
+    }
+    
+    const basicSumInsuredValue = parseFloat(basicSumInsured)
+    if (isNaN(basicSumInsuredValue) || basicSumInsuredValue <= 0) {
+      message.error('基本保额必须是大于0的数字')
+      return
+    }
+    
+    // 获取保单信息
+    const policyInfo = getPolicyInfo()
+    console.log('[手动计算] 保单信息:', policyInfo)
+    
+    // 计算所有来自库的责任
+    const hasLibraryCoverages = coverages.some(c => c.source === 'library')
+    if (!hasLibraryCoverages) {
+      message.warning('当前没有需要计算的责任')
+      return
+    }
+    
+    console.log('[手动计算] 开始计算，当前责任数：', coverages.length)
+    
+    const recalculatedCoverages = coverages.map((c, index) => {
+      if (c.source === 'library' && c.parseResult) {
+        console.log(`[手动计算] 正在计算第${index + 1}个责任:`, c.name)
+        const calculatedResult = calculateKeyAmounts(c.parseResult, policyInfo)
+        console.log(`[手动计算] 第${index + 1}个责任计算完成`)
+        return { ...c, parseResult: calculatedResult }
+      }
+      return c
+    })
+    
+    console.log('[手动计算] 所有责任计算完成，准备更新状态')
+    setCoverages(recalculatedCoverages)
+    message.success('理赔金额计算完成！', 2)
+  }
+  
+  // 判断是否有来自库的责任
+  const hasLibraryCoverages = coverages.some(c => c.source === 'library')
+  
+  // 判断是否已经计算过
+  const hasCalculatedAmounts = coverages.some(c => {
+    if (c.source === 'library' && c.parseResult) {
+      const tiers = c.parseResult?.payoutAmount?.details?.tiers || []
+      return tiers.some((t: any) => t.keyAmounts && t.keyAmounts.length > 0)
+    }
+    return false
+  })
+  
+  // 查询产品并自动填充
+  const handleProductSearch = async () => {
+    if (!productIdNumber.trim()) {
+      return
+    }
+    
+    try {
+      message.loading('正在查询产品...', 0)
+      
+      // 查询产品
+      const productRes = await getProducts({ 保险产品ID号: productIdNumber })
+      if (!productRes.data || productRes.data.length === 0) {
+        message.destroy()
+        message.warning('未找到匹配的产品，请继续手动填写')
+        return
+      }
+      
+      const product = productRes.data[0]
+      
+      // 自动填充基础信息
+      setInsuranceCompany(product.insuranceCompany || product.公司名称 || '')
+      setPolicyType(product.productCategory === '疾病险' ? 'critical_illness' : 
+                    product.productCategory === '人寿险' ? 'life' :
+                    product.productCategory === '意外险' ? 'accident' : 'annuity')
+      setProductName(product.productName || product.保险产品名称 || '')
+      
+      // 查询责任列表
+      const coverageRes = await getCoverageLibrary({ 
+        保单ID号: productIdNumber,
+        pageSize: 100
+      })
+      
+      if (coverageRes.data && coverageRes.data.length > 0) {
+        // 将责任库的数据转换为Coverage格式
+        const standardCoverages: Coverage[] = coverageRes.data.map((c: any) => {
+          // 确保 parseResult 包含所有必要字段
+          const parseResult = c.parsedResult || {}
+          
+          // 🔑 从顶层对象复制关键字段（后端enrichCoverageData添加的字段）
+          // 自然语言描述
+          if (!parseResult.naturalLanguageDesc && c.naturalLanguageDesc) {
+            parseResult.naturalLanguageDesc = c.naturalLanguageDesc
+          }
+          // 赔付金额数组
+          if (!parseResult.payoutAmount && c.payoutAmount) {
+            parseResult.payoutAmount = c.payoutAmount
+          }
+          
+          // 如果 parsedResult 不包含赔付次数等字段，从顶层对象复制
+          if (!parseResult.赔付次数 && c.赔付次数) {
+            parseResult.赔付次数 = c.赔付次数
+          }
+          if (!parseResult.是否可以重复赔付 && c.是否可以重复赔付 !== undefined) {
+            parseResult.是否可以重复赔付 = c.是否可以重复赔付
+          }
+          if (!parseResult.是否分组 && c.是否分组 !== undefined) {
+            parseResult.是否分组 = c.是否分组
+          }
+          if (!parseResult.间隔期 && c.间隔期) {
+            parseResult.间隔期 = c.间隔期
+          }
+          if (!parseResult.是否豁免 && c.是否豁免 !== undefined) {
+            parseResult.是否豁免 = c.是否豁免
+          }
+          
+          return {
+            id: `lib-${c.id}`,
+            name: c.coverageName || c.责任名称,
+            type: c.coverageType || c.责任类型,
+            source: 'library' as const,
+            libraryId: c.id,
+            isRequired: c.isRequired || c.是否必选 || '可选',
+            isSelected: c.isRequired === '必选' || c.是否必选 === '必选', // 必选责任默认选中
+            parseResult: parseResult
+          }
+        })
+        
+        // 🔑 检查是否已填写计算所需的必要信息
+        const canCalculate = hasRequiredPolicyInfo()
+        
+        if (canCalculate) {
+          // ✅ 立即计算所有责任的理赔金额
+          message.destroy()
+          message.loading({ content: '正在计算理赔金额...', key: 'calc', duration: 0 })
+          
+          const policyInfo = getPolicyInfo()
+          const calculatedCoverages = standardCoverages.map(c => {
+            if (c.parseResult) {
+              const calculatedResult = calculateKeyAmounts(c.parseResult, policyInfo)
+              return { ...c, parseResult: calculatedResult }
+            }
+            return c
+          })
+          
+          setCoverages(calculatedCoverages)
+          setShowCoverageInput(false)
+          message.destroy()
+          message.success(`已加载${standardCoverages.length}项责任并计算理赔金额`)
+        } else {
+          // ⚠️ 提示用户填写必要信息后才能计算
+          setCoverages(standardCoverages)
+          setShowCoverageInput(false)
+          message.destroy()
+          message.info(`已加载${standardCoverages.length}项责任，请填写基础信息后将自动计算理赔金额`)
+        }
+      } else {
+        message.destroy()
+        message.success('已填充产品信息')
+      }
+    } catch (error: any) {
+      message.destroy()
+      message.error('查询失败：' + error.message)
+    }
+  }
+  
   const handleAnalyzeCoverage = async () => {
     if (!clauseText.trim()) {
       message.warning('请输入责任条款')
@@ -1385,8 +1788,14 @@ export default function SmartInputPage() {
       return
     }
 
+    // 检查是否有选中的责任
+    const selectedCount = coverages.filter(c => c.isSelected !== false).length
     if (coverages.length === 0) {
       message.warning('请至少添加一项保障责任')
+      return
+    }
+    if (selectedCount === 0) {
+      message.warning('请至少选择一项保障责任')
       return
     }
 
@@ -1422,118 +1831,40 @@ export default function SmartInputPage() {
         }
       }
       
-      // 如果基础信息已修改，重新计算所有责任的 keyAmounts（必须有责任才能保存）
+      // 🔄 如果基础信息已修改，使用统一的 calculateKeyAmounts 重新计算所有责任
       if (policyInfoChanged || coverageEndYearChanged) {
         message.loading({ content: '检测到保单信息已修改，正在重新计算所有责任...', key: 'recalc', duration: 0 })
         console.log('[保存合同] 开始重新计算所有责任...')
         
         try {
-          const policyStartAge = currentPolicyInfo.policyStartYear - currentPolicyInfo.birthYear
-          const basicSumInsuredWan = currentPolicyInfo.basicSumInsured / 10000
-        
-        // 计算新的保障结束年龄
-          const newCoverageEndAge = currentPolicyInfo.coverageEndYear === 'lifetime' 
-          ? 150 // 终身假设到150岁
-            : Number(currentPolicyInfo.coverageEndYear) - currentPolicyInfo.birthYear
-        
-          console.log(`[保存合同] 新的保障结束年龄: ${newCoverageEndAge}岁 (保障结束年份: ${currentPolicyInfo.coverageEndYear})`)
-        
-        // 重新计算每个责任
-        finalCoverages = coverages.map((coverage, coverageIndex) => {
-          console.log(`[保存合同] 重新计算责任${coverageIndex + 1}: ${coverage.name}`)
-          
-          if (!coverage.result?.payoutAmount?.details?.tiers) {
+          // 🔑 复用统一的计算函数
+          finalCoverages = coverages.map((coverage, coverageIndex) => {
+            console.log(`[保存合同] 重新计算责任${coverageIndex + 1}: ${coverage.name}`)
+            
+            if (coverage.result) {
+              const calculatedResult = calculateKeyAmounts(coverage.result, currentPolicyInfo)
+              return { ...coverage, result: calculatedResult }
+            } else if (coverage.parseResult) {
+              const calculatedResult = calculateKeyAmounts(coverage.parseResult, currentPolicyInfo)
+              return { ...coverage, parseResult: calculatedResult }
+            }
             return coverage
-          }
-          
-          const recalculatedTiers = coverage.result.payoutAmount.details.tiers.map((tier: any, tierIndex: number) => {
-            if (!tier.startAge || !tier.endAge || !tier.formula) {
-              return tier
-            }
-            
-            const currentStartAge = parseInt(tier.startAge.toString())
-            let currentEndAge = parseInt(tier.endAge.toString())
-            
-            // 重要：如果结束年龄超过新的保障结束年龄，则限制为新的保障结束年龄
-            if (currentEndAge > newCoverageEndAge) {
-              console.log(`[保存合同] 责任${coverageIndex + 1}-阶段${tierIndex + 1}: 结束年龄从${currentEndAge}岁调整为${newCoverageEndAge}岁`)
-              currentEndAge = newCoverageEndAge
-            }
-            
-            // 如果开始年龄超过新的保障结束年龄，则跳过这个tier
-            if (currentStartAge > newCoverageEndAge) {
-              console.log(`[保存合同] 责任${coverageIndex + 1}-阶段${tierIndex + 1}: 开始年龄${currentStartAge}岁超过保障结束年龄${newCoverageEndAge}岁，跳过`)
-              return tier
-            }
-            
-            const formula = tier.formula || ''
-            const formulaType = tier.formulaType || 'fixed'
-            const interestRate = parseFloat(tier.interestRate?.toString() || '0') / 100
-            
-            const newKeyAmounts: any[] = []
-            
-            for (let age = currentStartAge; age <= currentEndAge; age++) {
-              const year = currentPolicyInfo.birthYear + age
-              const n = age - policyStartAge
-              let amount = 0
-              
-              if (formulaType === 'compound') {
-                amount = basicSumInsuredWan * Math.pow(1 + interestRate, n)
-              } else if (formulaType === 'simple') {
-                amount = basicSumInsuredWan * (1 + interestRate * n)
-              } else if (formulaType === 'fixed') {
-                const percentMatch = formula.match(/(\d+(?:\.\d+)?)%/)
-                const ratioMatch = formula.match(/×\s*(\d+(?:\.\d+)?)(?!%)/)
-                
-                if (percentMatch) {
-                  amount = basicSumInsuredWan * (parseFloat(percentMatch[1]) / 100)
-                } else if (ratioMatch) {
-                  amount = basicSumInsuredWan * parseFloat(ratioMatch[1])
-                } else {
-                  amount = basicSumInsuredWan
-                }
-              } else {
-                amount = basicSumInsuredWan
-              }
-              
-              newKeyAmounts.push({
-                year,
-                age,
-                amount: parseFloat(amount.toFixed(1))
-              })
-            }
-            
-            console.log(`[保存合同] 责任${coverageIndex + 1}-阶段${tierIndex + 1}: 重新计算完成，共${newKeyAmounts.length}个年份`)
-            
-            return {
-              ...tier,
-              endAge: currentEndAge, // 更新结束年龄
-              keyAmounts: newKeyAmounts
-            }
           })
           
-          return {
-            ...coverage,
-            result: {
-              ...coverage.result,
-              payoutAmount: {
-                ...coverage.result.payoutAmount,
-                details: {
-                  ...coverage.result.payoutAmount.details,
-                  tiers: recalculatedTiers
-                }
-              }
-            }
-          }
-        })
-        
-        message.success({ content: '所有责任重新计算完成', key: 'recalc', duration: 1 })
-        setPolicyInfoChanged(false) // 重置标志
-        } catch (recalcError) {
-          console.error('[保存合同] 重新计算责任时出错:', recalcError)
-          message.error({ content: '重新计算责任时出错，将使用原始数据保存', key: 'recalc', duration: 3 })
-          // 使用原始coverages，不更新finalCoverages
+          message.success({ content: '重新计算完成', key: 'recalc', duration: 1 })
+        } catch (error: any) {
+          console.error('[保存合同] 重新计算失败:', error)
+          message.error({ content: '重新计算失败: ' + error.message, key: 'recalc' })
+          return
         }
+      }
+      
+      // 只保存已选中的责任
+      const selectedCoverages = finalCoverages.filter(c => c.isSelected !== false)
+      
+      if (selectedCoverages.length === 0) {
+        message.warning('请至少选择一项保障责任')
+        return
       }
       
       const policyData = {
@@ -1548,7 +1879,8 @@ export default function SmartInputPage() {
         totalPaymentPeriod: totalPaymentPeriod === 'lifetime' ? 'lifetime' : parseInt(totalPaymentPeriod),
         annualPremium: parseFloat(annualPremium),
         basicSumInsured: parseFloat(basicSumInsured) * 10000,
-        coverages: finalCoverages
+        productIdNumber: productIdNumber || undefined, // 保存产品ID号
+        coverages: selectedCoverages
       }
 
       if (editId) {
@@ -1611,7 +1943,7 @@ export default function SmartInputPage() {
         {/* 左右两栏布局 */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          gridTemplateColumns: '9fr 11fr',
           gap: '24px'
         }}>
           {/* 左侧：输入区域 */}
@@ -1629,12 +1961,61 @@ export default function SmartInputPage() {
               marginBottom: '20px',
               paddingBottom: '12px',
               borderBottom: '2px solid #01BCD6'
-            }}>📝 输入保险条款</h2>
+            }}>📝 请录入您的保单信息</h2>
 
             {/* 保单基本信息 */}
-            <div style={{ marginBottom: '24px' }}>
+            <div style={{ marginBottom: '16px' }}>
+              {/* 保险产品ID号 */}
+              <div style={{ marginBottom: '8px' }}>
+                <label className="html-label">
+                  保险产品ID号 <span style={{ fontSize: '12px', color: '#999', fontWeight: 'normal' }}>💡 输入产品编码可自动填充保险公司、产品名称及责任清单</span>
+                </label>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    className="html-input"
+                    placeholder="如：百年人寿[2020]疾病保险013号"
+                    value={productIdNumber}
+                    onChange={(e) => setProductIdNumber(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        handleProductSearch()
+                      }
+                    }}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleProductSearch}
+                    style={{ 
+                      padding: '8px 24px', 
+                      whiteSpace: 'nowrap',
+                      background: '#01BCD6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      cursor: 'pointer',
+                      transition: 'all 0.3s',
+                      boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-1px)'
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(1, 188, 214, 0.3)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)'
+                      e.currentTarget.style.boxShadow = '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
+                    }}
+                  >
+                    🔍 查询
+                  </button>
+                </div>
+              </div>
+              
               {/* 保险公司 */}
-              <div style={{ marginBottom: '16px' }}>
+              <div style={{ marginBottom: '8px' }}>
                 <label className="html-label">
                   保险公司 <span className="required">*</span>
                 </label>
@@ -1645,7 +2026,7 @@ export default function SmartInputPage() {
               </div>
 
               {/* 保单类型和产品名称 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
                 <div>
                   <label className="html-label">
                     保单类型 <span className="required">*</span>
@@ -1675,7 +2056,7 @@ export default function SmartInputPage() {
               </div>
 
               {/* 被保险人和出生年份 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
                 <div>
                   <label className="html-label">
                     被保险人 <span className="required">*</span>
@@ -1699,6 +2080,7 @@ export default function SmartInputPage() {
                     className="html-select"
                     value={birthYear}
                     onChange={(e) => setBirthYear(e.target.value)}
+                    style={getFieldHighlightStyle(birthYear)}
                   >
                     <option value="">请选择出生年份</option>
                     {birthYears.reverse().map(year => (
@@ -1709,7 +2091,7 @@ export default function SmartInputPage() {
               </div>
 
               {/* 投保开始年份和保障结束年份 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
                 <div>
                   <label className="html-label">
                     投保开始年份 <span className="required">*</span>
@@ -1718,6 +2100,7 @@ export default function SmartInputPage() {
                     className="html-select"
                     value={policyStartYear}
                     onChange={(e) => setPolicyStartYear(e.target.value)}
+                    style={getFieldHighlightStyle(policyStartYear)}
                   >
                     <option value="">请选择投保开始年份</option>
                     {startYears.map(year => (
@@ -1733,6 +2116,7 @@ export default function SmartInputPage() {
                     className="html-select"
                     value={coverageEndYear}
                     onChange={(e) => setCoverageEndYear(e.target.value)}
+                    style={getFieldHighlightStyle(coverageEndYear)}
                   >
                     <option value="">请选择保障结束年份</option>
                     <option value="lifetime">终身</option>
@@ -1744,7 +2128,7 @@ export default function SmartInputPage() {
               </div>
 
               {/* 总缴费期限和每年保费 */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
                 <div>
                   <label className="html-label">
                     总缴费期限 <span className="required">*</span>
@@ -1756,6 +2140,7 @@ export default function SmartInputPage() {
                     className="html-select"
                     value={totalPaymentPeriod}
                     onChange={(e) => setTotalPaymentPeriod(e.target.value)}
+                    style={getFieldHighlightStyle(totalPaymentPeriod)}
                   >
                     <option value="">请选择缴费期限</option>
                     {PAYMENT_PERIODS.map(period => (
@@ -1776,7 +2161,7 @@ export default function SmartInputPage() {
                       placeholder="请输入每年保费"
                       value={annualPremium}
                       onChange={(e) => setAnnualPremium(e.target.value)}
-                      style={{ paddingRight: '40px' }}
+                      style={{ paddingRight: '40px', ...getFieldHighlightStyle(annualPremium) }}
                     />
                     <span style={{
                       position: 'absolute',
@@ -1791,37 +2176,464 @@ export default function SmartInputPage() {
               </div>
 
               {/* 基本保额 */}
-              <div style={{ marginBottom: '16px' }}>
+              <div style={{ marginBottom: '8px' }}>
                 <label className="html-label">
                   基本保额 <span className="required">*</span>
                 </label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="number"
-                    className="html-input"
-                    placeholder="请输入基本保额"
-                    value={basicSumInsured}
-                    onChange={(e) => setBasicSumInsured(e.target.value)}
-                    style={{ paddingRight: '40px' }}
-                  />
-                  <span style={{
-                    position: 'absolute',
-                    right: '12px',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    color: '#666',
-                    fontSize: '14px'
-                  }}>万元</span>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: hasLibraryCoverages ? '1fr 200px' : '1fr', 
+                  gap: '12px',
+                  alignItems: 'end'
+                }}>
+                  {/* 基本保额输入框 */}
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      className="html-input"
+                      placeholder="请输入基本保额"
+                      value={basicSumInsured}
+                      onChange={(e) => setBasicSumInsured(e.target.value)}
+                      style={{ paddingRight: '40px', ...getFieldHighlightStyle(basicSumInsured) }}
+                    />
+                    <span style={{
+                      position: 'absolute',
+                      right: '12px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: '#666',
+                      fontSize: '14px'
+                    }}>万元</span>
+                  </div>
+                  
+                  {/* 计算理赔金额按钮 - 仅在有库责任时显示 */}
+                  {hasLibraryCoverages && (
+                    <button
+                      onClick={handleManualCalculate}
+                      style={{
+                        width: '100%',
+                        padding: '12px 20px',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: 'white',
+                        background: '#01BCD6',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'all 0.3s',
+                        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+                        whiteSpace: 'nowrap'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)'
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.3)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)'
+                        e.currentTarget.style.boxShadow = '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
+                      }}
+                    >
+                      {hasCalculatedAmounts ? '🔄 重新计算' : '💫 计算理赔金额'}
+                    </button>
+                  )}
                 </div>
               </div>
+              
+              {/* 提示信息 - 仅在有库责任时显示 */}
+              {hasLibraryCoverages && (
+                <div style={{ 
+                  marginBottom: '8px',
+                  padding: '8px 12px',
+                  background: 'rgba(1, 188, 214, 0.05)',
+                  border: '1px solid rgba(1, 188, 214, 0.2)',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  color: '#01BCD6',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  {hasCalculatedAmounts ? (
+                    <>
+                      <span>✅</span>
+                      <span>理赔金额已计算，如需重新计算请点击上方按钮</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>💡</span>
+                      <span>已选择 {coverages.filter(c => c.source === 'library').length} 个责任，填写完保单信息后点击按钮计算金额</span>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* 责任类型选择 */}
+            {/* 保障责任列表 */}
             <div className="html-divider">
               <div className="html-divider-line"></div>
-              <div className="html-divider-text">请选择责任类型</div>
+              <div className="html-divider-text">保障责任列表</div>
               <div className="html-divider-line"></div>
             </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              {coverages.length === 0 ? (
+                <p style={{ color: '#999', textAlign: 'center', padding: '20px', fontSize: '14px' }}>
+                  暂无责任，请点击下方按钮新增责任
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px' }}>
+                  {coverages.map((coverage, index) => {
+                    // 🔑 计算理赔金额范围（统一逻辑）
+                    const payoutAmountDisplay = (() => {
+                      const parseResult = coverage.parseResult || coverage.result
+                      const tiers = parseResult?.payoutAmount?.details?.tiers || []
+                      const hasKeyAmounts = tiers.some((t: any) => t.keyAmounts && t.keyAmounts.length > 0)
+                      
+                      if (!hasKeyAmounts) {
+                        // 未计算：显示提示
+                        if (coverage.source === 'library' && !hasRequiredPolicyInfo()) {
+                          return <span style={{ color: '#FF7A5C', fontSize: '13px', fontStyle: 'italic' }}>
+                            💡 待信息填全后点击计算
+                          </span>
+                        }
+                        return <span style={{ color: '#999', fontSize: '13px' }}>暂无金额信息</span>
+                      }
+                      
+                      // 已计算：提取最小和最大金额
+                      const amounts: number[] = []
+                      tiers.forEach((tier: any) => {
+                        if (tier.keyAmounts && tier.keyAmounts.length > 0) {
+                          tier.keyAmounts.forEach((ka: any) => {
+                            if (typeof ka.amount === 'number') {
+                              amounts.push(ka.amount)
+                            }
+                          })
+                        }
+                      })
+                      
+                      if (amounts.length === 0) {
+                        return <span style={{ color: '#999', fontSize: '13px' }}>暂无金额信息</span>
+                      }
+                      
+                      const minAmount = Math.min(...amounts)
+                      const maxAmount = Math.max(...amounts)
+                      
+                      if (minAmount === maxAmount) {
+                        return <span style={{ color: '#01BCD6', fontWeight: 600, fontSize: '14px' }}>
+                          {minAmount.toFixed(1)}万元
+                        </span>
+                      }
+                      
+                      return <span style={{ color: '#01BCD6', fontWeight: 600, fontSize: '14px' }}>
+                        {minAmount.toFixed(1)}-{maxAmount.toFixed(1)}万元
+                      </span>
+                    })()
+                    
+                    // 提取赔付次数（兼容两种格式：对象格式和字符串格式）
+                    const parseResult = coverage.parseResult || coverage.result
+                    let payoutCountDisplay = '暂无信息'
+                    
+                    // 格式1：从 parseResult.payoutCount 对象中提取（手动解析的）
+                    if (parseResult?.payoutCount?.type === 'single') {
+                      payoutCountDisplay = '单次赔付'
+                    } else if (parseResult?.payoutCount?.maxCount) {
+                      payoutCountDisplay = `最多${parseResult.payoutCount.maxCount}次`
+                    }
+                    // 格式2：从数据库字段中提取（责任库的）
+                    else if (parseResult?.赔付次数) {
+                      payoutCountDisplay = parseResult.赔付次数
+                    }
+                    
+                    return (
+                      <div key={index} style={{
+                        padding: '12px',
+                        background: '#f8fdfe',
+                        borderRadius: '8px',
+                        border: coverage.isSelected === false ? '2px dashed #ccc' : '2px solid #CAF4F7',
+                        position: 'relative',
+                        opacity: coverage.isSelected === false ? 0.6 : 1
+                      }}>
+                        {/* 右上角标签：必选/已选/未选 */}
+                        <div style={{
+                          position: 'absolute',
+                          top: '8px',
+                          right: '8px',
+                          display: 'flex',
+                          gap: '6px',
+                          alignItems: 'center'
+                        }}>
+                          {/* 必选责任显示必选标签 */}
+                          {coverage.isRequired === '必选' && (
+                            <span style={{
+                              padding: '5px 12px',
+                              fontSize: '13px',
+                              fontWeight: '600',
+                              borderRadius: '12px',
+                              background: '#ffebee',
+                              color: '#c62828'
+                            }}>
+                              必选
+                            </span>
+                          )}
+                          {/* 可选责任显示勾选框 */}
+                          {coverage.isRequired !== '必选' && (
+                            <label
+                              onClick={() => {
+                                const newCoverages = [...coverages]
+                                newCoverages[index] = {
+                                  ...coverage,
+                                  isSelected: !coverage.isSelected
+                                }
+                                setCoverages(newCoverages)
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                fontSize: '13px',
+                                fontWeight: '600',
+                                color: coverage.isSelected === false ? '#999' : '#01BCD6',
+                                cursor: 'pointer',
+                                userSelect: 'none'
+                              }}
+                            >
+                              {/* 勾选框 */}
+                              <span style={{
+                                width: '16px',
+                                height: '16px',
+                                border: coverage.isSelected === false ? '2px solid #ccc' : '2px solid #01BCD6',
+                                borderRadius: '3px',
+                                background: coverage.isSelected === false ? 'white' : '#01BCD6',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'all 0.3s'
+                              }}>
+                                {coverage.isSelected !== false && (
+                                  <span style={{ color: 'white', fontSize: '12px', fontWeight: 'bold' }}>✓</span>
+                                )}
+                              </span>
+                              {coverage.isSelected === false ? '未选' : '已选'}
+                            </label>
+                          )}
+                        </div>
+                        
+                        {/* 责任名称 + 责任大类 + 小分类标签 */}
+                        <div style={{ fontWeight: 600, marginBottom: '6px', paddingRight: '80px', fontSize: '15px' }}>
+                          {coverage.name}
+                          {/* 责任大类标签 */}
+                          <span style={{
+                            marginLeft: '8px',
+                            padding: '2px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            background: coverage.type === '疾病责任' || coverage.type === '疾病类' ? '#e8f5e9' :
+                                       coverage.type === '身故责任' || coverage.type === '身故类' ? '#ffebee' :
+                                       coverage.type === '意外责任' || coverage.type === '意外类' ? '#fff3e0' :
+                                       coverage.type === '年金责任' || coverage.type === '年金类' ? '#e3f2fd' : '#f5f5f5',
+                            color: coverage.type === '疾病责任' || coverage.type === '疾病类' ? '#2e7d32' :
+                                   coverage.type === '身故责任' || coverage.type === '身故类' ? '#c62828' :
+                                   coverage.type === '意外责任' || coverage.type === '意外类' ? '#f57c00' :
+                                   coverage.type === '年金责任' || coverage.type === '年金类' ? '#1565c0' : '#666'
+                          }}>
+                            {coverage.type || '未分类'}
+                          </span>
+                          {/* 小分类标签（重疾/中症/轻症/其他） */}
+                          <span style={{
+                            marginLeft: '6px',
+                            padding: '2px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            background: detectCoverageCategory(coverage.name) === '重疾责任' ? '#ffebee' :
+                                       detectCoverageCategory(coverage.name) === '中症责任' ? '#fff3e0' :
+                                       detectCoverageCategory(coverage.name) === '轻症责任' ? '#e8f5e9' :
+                                       detectCoverageCategory(coverage.name) === '其他' ? '#e3f2fd' : '#f5f5f5',
+                            color: detectCoverageCategory(coverage.name) === '重疾责任' ? '#c62828' :
+                                   detectCoverageCategory(coverage.name) === '中症责任' ? '#f57c00' :
+                                   detectCoverageCategory(coverage.name) === '轻症责任' ? '#2e7d32' :
+                                   detectCoverageCategory(coverage.name) === '其他' ? '#1565c0' : '#666'
+                          }}>
+                            {detectCoverageCategory(coverage.name)}
+                          </span>
+                        </div>
+                        
+                        {/* 🔑 理赔金额 + 赔付次数 */}
+                        <div style={{ fontSize: '13px', color: '#666' }}>
+                          <div style={{ marginBottom: '3px' }}>
+                            <span style={{ marginRight: '4px' }}>💰 理赔金额：</span>
+                            {payoutAmountDisplay}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div>
+                              <span style={{ marginRight: '4px' }}>🔄 赔付次数：</span>
+                              <span style={{ fontSize: '13px', color: '#666' }}>{payoutCountDisplay}</span>
+                            </div>
+                            {/* 编辑、删除按钮与赔付次数对齐 */}
+                            <div style={{
+                              display: 'flex',
+                              gap: '6px',
+                              marginLeft: 'auto'
+                            }}>
+                              <button
+                                onClick={() => {
+                                  // 🔑 编辑模式：只加载解析结果，不显示新增责任的输入表单
+                                  setEditingIndex(index)
+                                  setSelectedCoverageType(coverage.type)
+                                  setClauseText(coverage.clause || '')
+                                  setCoverageName(coverage.name)
+                                  
+                                  // 支持两种字段名
+                                  const result = coverage.result || coverage.parseResult
+                                  setParseResult(result)
+                                  
+                                  // 🔑 编辑模式不展开新增责任区域
+                                  setShowCoverageInput(false)
+                                  
+                                  message.info('已加载责任信息，修改后点击"保存责任"更新')
+                                  // 滚动到编辑区域
+                                  window.scrollTo({ top: 0, behavior: 'smooth' })
+                                }}
+                                style={{
+                                  fontSize: '13px',
+                                  padding: '5px 14px',
+                                  fontWeight: '500',
+                                  background: '#01BCD6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.3s'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#00A8C0'
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#01BCD6'
+                                }}
+                              >
+                                编辑
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCoverage(index)}
+                                style={{
+                                  fontSize: '13px',
+                                  padding: '5px 14px',
+                                  fontWeight: '500',
+                                  background: '#FF7A5C',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.3s'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = '#FF6347'
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = '#FF7A5C'
+                                }}
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 新增责任按钮 - 编辑模式时隐藏 */}
+            {editingIndex === null && (
+              <div style={{ marginBottom: '24px' }}>
+                <button
+                  type="button"
+                  className="html-button-primary"
+                  onClick={() => setShowCoverageInput(!showCoverageInput)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    border: '2px dashed #01BCD6',
+                    background: showCoverageInput ? '#01BCD6' : 'white',
+                    color: showCoverageInput ? 'white' : '#01BCD6'
+                  }}
+                >
+                  {showCoverageInput ? '收起责任分析' : '+ 新增责任'}
+                </button>
+              </div>
+            )}
+
+            {/* 编辑模式提示 */}
+            {editingIndex !== null && (
+              <div style={{ 
+                marginBottom: '24px',
+                padding: '16px',
+                background: '#e6f7ff',
+                border: '2px solid #01BCD6',
+                borderRadius: '8px'
+              }}>
+                <div style={{ 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  marginBottom: '12px'
+                }}>
+                  <span style={{ fontSize: '15px', fontWeight: '600', color: '#01BCD6' }}>
+                    ✏️ 正在编辑：{coverageName}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setEditingIndex(null)
+                      setParseResult(null)
+                      setCoverageName('')
+                      setClauseText('')
+                      message.info('已取消编辑')
+                    }}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      background: '#FF7A5C',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    取消编辑
+                  </button>
+                </div>
+                {/* 责任名称编辑 */}
+                <div>
+                  <label className="html-label" style={{ marginBottom: '6px', display: 'block' }}>
+                    责任名称
+                  </label>
+                  <input
+                    type="text"
+                    className="html-input"
+                    value={coverageName}
+                    onChange={(e) => setCoverageName(e.target.value)}
+                    placeholder="输入责任名称"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* 责任分析区域（可折叠）- 仅新增模式显示 */}
+            {showCoverageInput && editingIndex === null && (
+              <>
+                {/* 责任类型选择 */}
+                <div className="html-divider">
+                  <div className="html-divider-line"></div>
+                  <div className="html-divider-text">请选择责任类型</div>
+                  <div className="html-divider-line"></div>
+                </div>
             
             <div style={{ 
               display: 'grid', 
@@ -1899,20 +2711,12 @@ export default function SmartInputPage() {
                 🔍 分析责任
               </button>
             </div>
+              </>
+            )}
 
-            {/* 责任列表 */}
-            <div className="html-divider">
-              <div className="html-divider-line"></div>
-              <div className="html-divider-text">保障责任列表</div>
-              <div className="html-divider-line"></div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              {coverages.length === 0 ? (
-                <p style={{ color: '#999', textAlign: 'center', padding: '20px', fontSize: '14px' }}>
-                  暂无责任，请在上方粘贴责任条款进行分析
-                </p>
-              ) : (
+            {/* 已移除重复的责任列表（已在上方显示） */}
+            <div style={{ display: 'none' }}>
+              {coverages.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {coverages.map((coverage, index) => (
                     <div key={index} style={{
@@ -1979,16 +2783,26 @@ export default function SmartInputPage() {
                         </div>
                       )}
                       {/* 赔付次数 */}
-                      {coverage.result?.payoutCount && (
+                      {(coverage.result?.payoutCount || coverage.result?.赔付次数) && (
                         <div style={{ fontSize: '13px', color: '#666', marginBottom: '4px' }}>
                           🔢 赔付次数：
-                          {coverage.result.payoutCount.type === 'single' ? (
-                            <span style={{ fontWeight: '600' }}>单次赔付（合同终止）</span>
-                          ) : coverage.result.payoutCount.maxCount ? (
-                            <span style={{ fontWeight: '600' }}>最多{coverage.result.payoutCount.maxCount}次</span>
-                          ) : (
-                            <span style={{ fontWeight: '600' }}>不限次数</span>
-                          )}
+                          {(() => {
+                            // 优先使用对象格式（手动解析的）
+                            if (coverage.result.payoutCount) {
+                              if (coverage.result.payoutCount.type === 'single') {
+                                return <span style={{ fontWeight: '600' }}>单次赔付（合同终止）</span>
+                              } else if (coverage.result.payoutCount.maxCount) {
+                                return <span style={{ fontWeight: '600' }}>最多{coverage.result.payoutCount.maxCount}次</span>
+                              } else {
+                                return <span style={{ fontWeight: '600' }}>不限次数</span>
+                              }
+                            }
+                            // 使用字符串格式（责任库的）
+                            else if (coverage.result.赔付次数) {
+                              return <span style={{ fontWeight: '600' }}>{coverage.result.赔付次数}</span>
+                            }
+                            return <span style={{ fontWeight: '600' }}>暂无信息</span>
+                          })()}
                         </div>
                       )}
                       {coverage.result?.overallConfidence && (
@@ -2015,9 +2829,9 @@ export default function SmartInputPage() {
                             let updatedResult = coverage.result
                             if (coverage.result?.payoutAmount?.details?.tiers && birthYear && coverageEndYear) {
                               const currentBirthYear = parseInt(birthYear)
-                              const currentCoverageEndYear = coverageEndYear === 'lifetime' ? 150 : parseInt(coverageEndYear)
+                              const currentCoverageEndYear = coverageEndYear === 'lifetime' ? 100 : parseInt(coverageEndYear)
                               const newCoverageEndAge = coverageEndYear === 'lifetime' 
-                                ? 150 
+                                ? 100 
                                 : currentCoverageEndYear - currentBirthYear
                               
                               console.log(`[编辑责任] 当前保障结束年份: ${coverageEndYear}, 对应年龄: ${newCoverageEndAge}岁`)
@@ -2113,30 +2927,6 @@ export default function SmartInputPage() {
 
             {/* 合同完成按钮 */}
             <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '2px solid #e0e0e0' }}>
-              {/* 基础信息变化提示 */}
-              {policyInfoChanged && coverages.length > 0 && (
-                <div style={{
-                  marginBottom: '16px',
-                  padding: '12px 16px',
-                  background: '#fff3cd',
-                  border: '2px solid #ffc107',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}>
-                  <span style={{ fontSize: '16px' }}>⚠️</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '14px', fontWeight: '600', color: '#856404', marginBottom: '4px' }}>
-                      检测到保单基础信息已修改
-                    </div>
-                    <div style={{ fontSize: '13px', color: '#856404' }}>
-                      保存合同时将自动重新计算所有责任的每年金额，确保数据准确性
-                    </div>
-                  </div>
-                </div>
-              )}
-              
               <button
                 className="complete-btn"
                 onClick={handleComplete}
@@ -2237,21 +3027,10 @@ export default function SmartInputPage() {
                     </div>
                   </div>
                 ) : (
-              <div style={{ 
-                background: 'white', 
-                padding: '24px', 
-                borderRadius: '12px',
-                border: '2px solid #CAF4F7'
-              }}>
+              <div>
                 {/* 责任名称 - 始终显示，即使为空也允许用户输入 */}
-                <div style={{ marginBottom: '24px' }}>
-                  <label style={{ 
-                    display: 'block', 
-                    fontSize: '14px', 
-                    fontWeight: '600', 
-                    color: '#333', 
-                    marginBottom: '8px' 
-                  }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <label className="html-label">
                     责任名称
                     {coverageName && coverageName.trim() && (
                       <span style={{
@@ -2275,34 +3054,27 @@ export default function SmartInputPage() {
                   </label>
                   <input
                     type="text"
+                    className="html-input"
                     value={coverageName}
                     onChange={(e) => setCoverageName(e.target.value)}
                     placeholder="请输入或编辑责任名称"
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      border: '2px solid #CAF4F7',
-                      borderRadius: '8px',
-                      fontSize: '14px',
-                      background: '#ffffff'
-                    }}
                   />
                 </div>
 
-                {/* 赔付金额 */}
+                {/* 理赔金额 */}
                 {parseResult.payoutAmount && (
                   <div style={{ 
-                    marginBottom: '24px',
+                    marginBottom: '16px',
                     padding: '20px',
                     background: '#f8fdfe',
                     borderRadius: '8px',
-                    border: '1px solid #CAF4F7'
+                    border: '2px solid #CAF4F7'
                   }}>
                     <div style={{ 
                       display: 'flex', 
                       justifyContent: 'space-between', 
                       alignItems: 'center',
-                      marginBottom: '16px'
+                      marginBottom: '12px'
                     }}>
                       <h3 style={{ 
                         fontSize: '16px', 
@@ -2310,7 +3082,7 @@ export default function SmartInputPage() {
                         color: '#333',
                         margin: 0
                       }}>
-                        💰 赔付金额
+                        💰 理赔金额
                       </h3>
                       {parseResult.payoutAmount.confidence && (
                         <span style={{
@@ -2330,50 +3102,35 @@ export default function SmartInputPage() {
                       )}
                     </div>
 
-                    {/* 解析方式 */}
-                    <div style={{ marginBottom: '12px', fontSize: '14px', color: '#666' }}>
-                      <span style={{ fontWeight: '600' }}>解析方式:</span>
-                      <span style={{ 
-                        marginLeft: '8px',
-                        color: '#2e7d32',
-                        fontWeight: '600'
-                      }}>
-                        ✅ 已调用大模型
-                      </span>
-                    </div>
-
-                    {/* 大模型的自然语言理解 */}
-                    {parseResult.payoutAmount.extractedText && (
-                      <div style={{ 
-                        marginBottom: '16px',
-                        padding: '12px',
-                        background: 'white',
-                        borderRadius: '6px',
-                        border: '1px solid #e0e0e0'
-                      }}>
+                    {/* 自然语言描述 */}
+                    {(() => {
+                      // 兼容多种数据结构
+                      const naturalDesc = parseResult.payoutAmount.extractedText || 
+                                         parseResult.payoutAmount.naturalLanguageDescription ||
+                                         parseResult.naturalLanguageDesc ||
+                                         (Array.isArray(parseResult.payoutAmount) && parseResult.payoutAmount.length > 0 
+                                           ? parseResult.payoutAmount.map((p: any) => p.naturalLanguageDescription).filter(Boolean).join('\n')
+                                           : null)
+                      
+                      if (!naturalDesc) return null
+                      
+                      return (
                         <div style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          marginBottom: '8px',
+                          marginBottom: '12px',
                           fontSize: '14px',
-                          fontWeight: '600',
-                          color: '#333'
+                          color: '#333',
+                          lineHeight: '1.6'
                         }}>
-                          <span style={{ marginRight: '6px' }}>☁️</span>
-                          大模型的自然语言理解:
+                          <span style={{ marginRight: '6px' }}>📝</span>
+                          <span style={{ fontWeight: '600' }}>自然语言描述:</span>
+                          <span style={{ marginLeft: '8px', color: '#666' }}>
+                            {Array.isArray(naturalDesc) 
+                              ? naturalDesc.join('；')
+                              : naturalDesc}
+                          </span>
                         </div>
-                        <div style={{ 
-                          fontSize: '13px', 
-                          color: '#666', 
-                          lineHeight: '1.6',
-                          whiteSpace: 'pre-wrap'
-                        }}>
-                          {Array.isArray(parseResult.payoutAmount.extractedText) 
-                            ? parseResult.payoutAmount.extractedText.join('\n')
-                            : parseResult.payoutAmount.extractedText}
-                        </div>
-                      </div>
-                    )}
+                      )
+                    })()}
 
                     {/* 阶段详情 */}
                     {(() => {
@@ -2481,16 +3238,32 @@ export default function SmartInputPage() {
                             onClick={() => {
                               // 🔗 新阶段的开始年龄自动连接到上一阶段的结束年龄+1
                               const lastTier = tiers[tiers.length - 1]
+                              const policyStartAge = parseInt(policyStartYear) - parseInt(birthYear)
                               const newStartAge = lastTier && typeof lastTier.endAge === 'number' 
                                 ? lastTier.endAge + 1 
-                                : parseInt(birthYear) + 1
+                                : policyStartAge
+                              
+                              // 计算结束年龄（默认到100岁）
+                              const defaultEndAge = 100
+                              
+                              // 初始化keyAmounts（基于基本保额100%计算）
+                              const basicSumInsuredWan = parseFloat(basicSumInsured)
+                              const initialKeyAmounts: any[] = []
+                              for (let age = newStartAge; age <= defaultEndAge; age++) {
+                                initialKeyAmounts.push({
+                                  year: parseInt(birthYear) + age,
+                                  age: age,
+                                  amount: basicSumInsuredWan // 基本保额×100%
+                                })
+                              }
                               
                               const newTier = {
                                 period: '新阶段',
                                 formula: '基本保额×100%',
+                                formulaType: 'fixed',
                                 startAge: newStartAge,
-                                endAge: 'lifetime',
-                                keyAmounts: []
+                                endAge: defaultEndAge,
+                                keyAmounts: initialKeyAmounts
                               }
                               const newTiers = [...tiers, newTier]
                               setParseResult({
@@ -2503,6 +3276,8 @@ export default function SmartInputPage() {
                                   }
                                 }
                               })
+                              
+                              message.success('已添加新阶段，请根据需要调整公式和年龄范围')
                             }}
                             style={{
                               width: '100%',
@@ -2536,14 +3311,25 @@ export default function SmartInputPage() {
                   </div>
                 )}
 
-                {/* 其他字段 - 赔付次数 */}
-                {parseResult.payoutCount && (
+                {/* 其他字段 - 赔付次数（兼容两种格式） */}
+                {(parseResult.payoutCount || parseResult.赔付次数) && (
                   <OtherFieldDisplay
                     title="赔付次数"
-                    data={parseResult.payoutCount}
+                    data={parseResult.payoutCount || { extractedText: parseResult.赔付次数 }}
                     renderContent={(data) => {
-                      const value = data?.type === 'single' ? '1' : 
-                                   (data?.type === 'multiple' && data?.maxCount ? data.maxCount.toString() : '1')
+                      // 兼容两种格式：
+                      // 1. payoutCount对象格式：{ type: 'single', maxCount: 1 }
+                      // 2. 赔付次数字符串格式："1次"、"最多3次"
+                      let value = '1'
+                      if (data?.type === 'single') {
+                        value = '1'
+                      } else if (data?.type === 'multiple' && data?.maxCount) {
+                        value = data.maxCount.toString()
+                      } else if (parseResult.赔付次数) {
+                        // 从字符串中提取数字
+                        const match = parseResult.赔付次数.match(/(\d+)/)
+                        value = match ? match[1] : '1'
+                      }
                       return (
                         <div style={{ marginTop: '12px', position: 'relative', display: 'inline-block' }}>
                           <input
@@ -2558,7 +3344,8 @@ export default function SmartInputPage() {
                                   ...parseResult.payoutCount,
                                   maxCount: newValue,
                                   type: newValue === 1 ? 'single' : 'multiple'
-                                }
+                                },
+                                赔付次数: newValue === 1 ? '1次' : `最多${newValue}次`
                               })
                             }}
                             style={{
@@ -2588,18 +3375,20 @@ export default function SmartInputPage() {
                   />
                 )}
 
-                {/* 其他字段 - 是否分组 */}
+                {/* 其他字段 - 是否分组（兼容责任库格式） */}
                 <OtherFieldDisplay
                   title="是否分组"
-                  data={parseResult.grouping}
-                  payoutCountData={parseResult.payoutCount}
+                  data={parseResult.grouping || (parseResult.是否分组 !== undefined ? { isGrouped: parseResult.是否分组 } : null)}
+                  payoutCountData={parseResult.payoutCount || (parseResult.赔付次数 === '1次' ? { type: 'single' } : null)}
                     renderContent={(data, payoutCountData) => {
-                      const isSinglePayout = payoutCountData?.type === 'single'
+                      const isSinglePayout = payoutCountData?.type === 'single' || parseResult.赔付次数 === '1次'
                       let defaultValue = 'not_grouped'
                       if (isSinglePayout) {
                         defaultValue = 'not_applicable'
                       } else if (data?.isGrouped !== undefined) {
                         defaultValue = data.isGrouped ? 'grouped' : 'not_grouped'
+                      } else if (parseResult.是否分组 !== undefined) {
+                        defaultValue = parseResult.是否分组 ? 'grouped' : 'not_grouped'
                       }
                       return (
                         <div style={{ marginTop: '12px', display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -2658,13 +3447,13 @@ export default function SmartInputPage() {
                     }}
                   />
 
-                {/* 其他字段 - 是否可以重复赔付 */}
+                {/* 其他字段 - 是否可以重复赔付（兼容责任库格式） */}
                 <OtherFieldDisplay
                     title="是否可以重复赔付"
-                    data={parseResult.repeatablePayout}
-                    payoutCountData={parseResult.payoutCount}
+                    data={parseResult.repeatablePayout || (parseResult.是否可以重复赔付 !== undefined ? { isRepeatable: parseResult.是否可以重复赔付 } : null)}
+                    payoutCountData={parseResult.payoutCount || (parseResult.赔付次数 === '1次' ? { type: 'single' } : null)}
                     renderContent={(data, payoutCountData) => {
-                      const isSinglePayout = payoutCountData?.type === 'single'
+                      const isSinglePayout = payoutCountData?.type === 'single' || parseResult.赔付次数 === '1次'
                       let defaultValue = 'repeatable'
                       if (isSinglePayout) {
                         defaultValue = 'not_applicable'
@@ -2672,6 +3461,8 @@ export default function SmartInputPage() {
                         defaultValue = data.isRepeatable ? 'repeatable' : 'not_repeatable'
                       } else if (typeof data === 'boolean') {
                         defaultValue = data ? 'repeatable' : 'not_repeatable'
+                      } else if (parseResult.是否可以重复赔付 !== undefined) {
+                        defaultValue = parseResult.是否可以重复赔付 ? 'repeatable' : 'not_repeatable'
                       }
                       return (
                         <div style={{ marginTop: '12px', display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -2730,18 +3521,22 @@ export default function SmartInputPage() {
                     }}
                   />
 
-                {/* 其他字段 - 间隔期 */}
+                {/* 其他字段 - 间隔期（兼容责任库格式） */}
                 <OtherFieldDisplay
                   title="间隔期"
-                  data={parseResult.intervalPeriod}
-                  payoutCountData={parseResult.payoutCount}
+                  data={parseResult.intervalPeriod || (parseResult.间隔期 ? { hasInterval: true, days: parseInt(parseResult.间隔期.match(/\d+/)?.[0] || '0'), extractedText: parseResult.间隔期 } : null)}
+                  payoutCountData={parseResult.payoutCount || (parseResult.赔付次数 === '1次' ? { type: 'single' } : null)}
                     renderContent={(data, payoutCountData) => {
-                      const isSinglePayout = payoutCountData?.type === 'single'
+                      const isSinglePayout = payoutCountData?.type === 'single' || parseResult.赔付次数 === '1次'
                       let value = '0'
                       if (data?.hasInterval === false) {
                         value = '0'
                       } else if (data?.hasInterval && data?.days) {
                         value = data.days.toString()
+                      } else if (parseResult.间隔期) {
+                        // 从字符串中提取数字，如"间隔180天"
+                        const match = parseResult.间隔期.match(/(\d+)/)
+                        value = match ? match[1] : '0'
                       }
                       if (isSinglePayout) {
                         value = '0'
@@ -2801,16 +3596,18 @@ export default function SmartInputPage() {
                     }}
                   />
 
-                {/* 其他字段 - 疾病发生是否豁免保费 */}
+                {/* 其他字段 - 疾病发生是否豁免保费（兼容责任库格式） */}
                 <OtherFieldDisplay
                     title="疾病发生是否豁免保费"
-                    data={parseResult.premiumWaiver}
+                    data={parseResult.premiumWaiver || (parseResult.是否豁免 !== undefined ? { isWaived: parseResult.是否豁免 } : null)}
                     renderContent={(data) => {
                       let defaultValue = 'not_waived'
                       if (typeof data === 'object' && data?.isWaived !== undefined) {
                         defaultValue = data.isWaived ? 'waived' : 'not_waived'
                       } else if (typeof data === 'boolean') {
                         defaultValue = data ? 'waived' : 'not_waived'
+                      } else if (parseResult.是否豁免 !== undefined) {
+                        defaultValue = parseResult.是否豁免 ? 'waived' : 'not_waived'
                       }
                       return (
                         <div style={{ marginTop: '12px', display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -2863,6 +3660,31 @@ export default function SmartInputPage() {
                         if (!coverageName || !coverageName.trim()) {
                           message.warning('请输入责任名称')
                           return
+                        }
+                        
+                        // 🔍 校验阶段时间是否重叠
+                        const tiers = parseResult?.payoutAmount?.details?.tiers || []
+                        if (tiers.length > 1) {
+                          // 按开始年龄排序
+                          const sortedTiers = [...tiers].sort((a: any, b: any) => {
+                            const aStart = a.startAge ?? a.keyAmounts?.[0]?.age ?? 0
+                            const bStart = b.startAge ?? b.keyAmounts?.[0]?.age ?? 0
+                            return aStart - bStart
+                          })
+                          
+                          // 检查是否有重叠
+                          for (let i = 0; i < sortedTiers.length - 1; i++) {
+                            const currentTier = sortedTiers[i]
+                            const nextTier = sortedTiers[i + 1]
+                            
+                            const currentEnd = currentTier.endAge ?? currentTier.keyAmounts?.[currentTier.keyAmounts?.length - 1]?.age
+                            const nextStart = nextTier.startAge ?? nextTier.keyAmounts?.[0]?.age
+                            
+                            if (currentEnd && nextStart && currentEnd >= nextStart) {
+                              message.error(`阶段时间重叠：第${i + 1}阶段结束年龄(${currentEnd}岁)不能大于或等于第${i + 2}阶段开始年龄(${nextStart}岁)`)
+                              return
+                            }
+                          }
                         }
                         
                         // 🔄 保存前自动重新计算所有阶段（确保数据一致性）
@@ -2940,7 +3762,7 @@ console.log(`[保存-重新计算] 基础信息: 投保金额=${basicSumInsuredW
                                 amount = basicSumInsuredWan * (1 + interestRate * n)
                               } else if (formulaType === 'fixed') {
                                 const percentMatch = formula.match(/(\d+(?:\.\d+)?)%/)
-                                const ratioMatch = formula.match(/×\s*(\d+(?:\.\d+)?)(?!%)/)
+                                const ratioMatch = formula.match(/[×*]\s*(\d+(?:\.\d+)?)(?!%)/)
                                 
                                 if (age === currentStartAge) {
                                   console.log(`[保存-计算公式] 公式="${formula}"，百分比匹配:`, percentMatch?.[1], '倍数匹配:', ratioMatch?.[1])
@@ -3007,7 +3829,10 @@ console.log(`[保存-重新计算] 基础信息: 投保金额=${basicSumInsuredW
                           type: selectedCoverageType,
                           clause: clauseText,
                           result: finalParseResult,
-                          policyType: policyType
+                          policyType: policyType,
+                          source: 'custom' as const,
+                          isSelected: true, // 新增责任默认选中
+                          isRequired: '可选' // 自定义责任默认可选
                         }
                         
                         console.log('[保存责任] 最终保存的 coverage.result.payoutAmount.details.tiers:', 

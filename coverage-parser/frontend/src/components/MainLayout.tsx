@@ -19,6 +19,9 @@ interface MainLayoutProps {
 const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  
+  // 版本标记：v2.0 - 管理员专区分组
+  console.log('🔵 MainLayout 版本 2.0 - 管理员专区分组');
 
   const menuItems: any[] = [
     {
@@ -29,17 +32,22 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     {
       key: '/my-policies',
       icon: <FileTextOutlined />,
-      label: '我家的保单',
+      label: '我的家庭保单',
     },
     {
       key: '/smart-input',
       icon: <EditOutlined />,
-      label: '保单智能录入',
+      label: '保单智能快录',
     },
     {
       key: '/diagnosis',
       icon: <SafetyOutlined />,
-      label: '家庭保障诊断',
+      label: '家庭保障体检',
+    },
+    {
+      key: '/recommendation',
+      icon: <DatabaseOutlined />,
+      label: '精选好险专区',
     },
     {
       type: 'divider' as const,

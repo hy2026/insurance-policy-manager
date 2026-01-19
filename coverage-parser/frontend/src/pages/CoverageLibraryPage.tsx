@@ -10,7 +10,9 @@ import {
   message,
   Row,
   Col,
-  Tooltip
+  Tooltip,
+  Upload,
+  Modal
 } from 'antd'
 import {
   SearchOutlined,
@@ -23,6 +25,7 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import CoverageDetailModal from '../components/CoverageDetailModal'
 import { getCoverageLibrary, exportCoverageLibrary, getCoverageLibraryStats, getContractStats } from '../services/api'
+import * as ExcelJS from 'exceljs'
 
 const { Option } = Select
 
@@ -33,6 +36,7 @@ interface CoverageItem {
   保单ID号?: string
   责任类型: string
   责任名称: string
+  isRequired?: string // 可选/必选
   责任原文: string
   naturalLanguageDesc?: any[]
   payoutAmount?: any[]
@@ -43,6 +47,10 @@ interface CoverageItem {
   间隔期?: string
   是否豁免?: boolean
   verified?: boolean
+  reviewStatus?: string // pending/approved/rejected
+  reviewNotes?: string
+  reviewedBy?: string
+  reviewedAt?: string
   parsedResult?: any
   createdAt: string
 }
@@ -61,6 +69,8 @@ export default function CoverageLibraryPage() {
     保单ID号: '',
     责任类型: '',
     责任名称: '',
+    isRequired: '',
+    赔付次数: '',
     是否可以重复赔付: '',
     是否分组: '',
     是否豁免: '',
@@ -70,6 +80,7 @@ export default function CoverageLibraryPage() {
   // 详情弹窗
   const [selectedItem, setSelectedItem] = useState<CoverageItem | null>(null)
   const [detailVisible, setDetailVisible] = useState(false)
+  
   
   // 当前选中的责任类型标签页（默认疾病责任）
   const [activeTab, setActiveTab] = useState<string>('疾病责任')
@@ -122,7 +133,10 @@ export default function CoverageLibraryPage() {
   // 加载统计数据
   const loadStats = async () => {
     try {
+      console.log('📊 loadStats 被调用')
+      console.log('   - selectedPolicyId:', selectedPolicyId)
       const statsData = await getCoverageLibraryStats(selectedPolicyId)
+      console.log('   - 统计数据返回:', statsData)
       setStats(statsData)
     } catch (error) {
       console.error('加载统计数据失败:', error)
@@ -142,18 +156,22 @@ export default function CoverageLibraryPage() {
         }
       })
       
-      console.log('发送请求，参数:', {
-        page: pagination.current,
-        pageSize: pagination.pageSize,
-        ...cleanFilters
-      })
+      console.log('🔍 loadData 被调用')
+      console.log('   - activeTab:', activeTab)
+      console.log('   - selectedPolicyId:', selectedPolicyId)
+      console.log('   - cleanFilters:', cleanFilters)
+      console.log('   - pagination:', pagination)
       
       // 根据当前选中的标签页，自动添加责任类型筛选
       const finalFilters = {
         ...cleanFilters,
         责任类型: activeTab, // 根据标签页自动筛选
-        保单ID号: selectedPolicyId || cleanFilters.保单ID号 // 如果选择了合同ID，添加到筛选条件
+        保单ID号: selectedPolicyId || cleanFilters.保单ID号, // 如果选择了合同ID，添加到筛选条件
+        sortBy: cleanFilters.sortBy || '序号', // 默认按序号排序
+        sortOrder: cleanFilters.sortOrder || 'asc' // 默认升序
       }
+      
+      console.log('   - finalFilters:', finalFilters)
       
       const response = await getCoverageLibrary({
         page: pagination.current,
@@ -161,10 +179,11 @@ export default function CoverageLibraryPage() {
         ...finalFilters
       })
       
-      console.log('API返回数据:', response) // 调试用
-      console.log('response.data类型:', typeof response.data, '是否为数组:', Array.isArray(response.data))
-      console.log('response.data长度:', Array.isArray(response.data) ? response.data.length : '不是数组')
-      console.log('response.total:', response.total)
+      console.log('📦 API返回数据:')
+      console.log('   - response:', response)
+      console.log('   - response.data类型:', typeof response.data, '是否为数组:', Array.isArray(response.data))
+      console.log('   - response.data长度:', Array.isArray(response.data) ? response.data.length : '不是数组')
+      console.log('   - response.total:', response.total)
       
       // 确保data是数组
       const dataArray = Array.isArray(response.data) ? response.data : []
@@ -173,17 +192,22 @@ export default function CoverageLibraryPage() {
         console.warn('⚠️ 数据数组为空，但total > 0，可能是分页问题')
       }
       
+      if (dataArray.length > 0) {
+        console.log('   - 第一条数据示例:', dataArray[0])
+      }
+      
       setData(dataArray)
       setTotal(response.total || 0)
-      // 统计数据由loadStats单独加载，这里不更新stats
       
-      console.log('✅ 设置完成 - 数据:', dataArray.length, '条, 总数:', response.total)
+      console.log('✅ setData 完成 - 数据条数:', dataArray.length, ', 总数:', response.total)
+      console.log('   - 当前 data state 应该有', dataArray.length, '条数据')
     } catch (error: any) {
       console.error('❌ 加载数据失败:', error)
       console.error('错误详情:', error.response || error.message)
       message.error(`加载数据失败: ${error.message || '未知错误'}`)
     } finally {
       setLoading(false)
+      console.log('🏁 loadData 完成，loading 设置为 false')
     }
   }
 
@@ -200,11 +224,189 @@ export default function CoverageLibraryPage() {
     }
   }
 
+  // 导入Excel
+  const handleImport = async (file: File) => {
+    // 显示确认对话框
+    Modal.confirm({
+      title: '⚠️ 确认导入责任库',
+      content: (
+        <div>
+          <p style={{ marginBottom: '8px', fontWeight: 'bold', color: '#ff4d4f' }}>
+            此操作将清空责任库，并重新导入！
+          </p>
+          <p style={{ marginBottom: '4px' }}>• 责任库所有数据将被清空</p>
+          <p style={{ marginBottom: '4px' }}>• 产品库不受影响（完全独立）</p>
+          <p style={{ marginBottom: '4px' }}>• 所有审核状态将丢失</p>
+          <p>• 此操作不可撤销</p>
+        </div>
+      ),
+      okText: '确认导入',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        await performImport(file)
+      }
+    })
+  }
+
+  const performImport = async (file: File) => {
+    try {
+      message.loading('正在导入...', 0)
+      
+      const workbook = new ExcelJS.Workbook()
+      
+      // 读取Excel文件
+      const buffer = await file.arrayBuffer()
+      await workbook.xlsx.load(buffer)
+      
+      console.log('📊 Excel文件信息:')
+      console.log('工作表数量:', workbook.worksheets.length)
+      
+      // 收集所有cases
+      const allCases: any[] = []
+      
+      // 遍历所有工作表
+      for (const worksheet of workbook.worksheets) {
+        if (worksheet.rowCount <= 1) {
+          console.log(`⏭️  跳过空sheet: ${worksheet.name}`)
+          continue
+        }
+        
+        console.log(`📂 处理sheet: ${worksheet.name}`)
+        const 责任类型 = worksheet.name
+        
+        // 获取表头
+        const headerRow = worksheet.getRow(1)
+        const headers: string[] = []
+        headerRow.eachCell((cell: any, colNum: number) => {
+          headers.push(String(cell.value || ''))
+        })
+        
+        // 遍历数据行
+        for (let rowNum = 2; rowNum <= worksheet.rowCount; rowNum++) {
+          const row = worksheet.getRow(rowNum)
+          
+          if (!row.hasValues) continue
+          
+          try {
+            // 读取单元格数据
+            const rowData: any = {}
+            headers.forEach((header, index) => {
+              const cell = row.getCell(index + 1)
+              rowData[header] = cell.value
+            })
+            
+            const 序号 = rowData['序号']
+            const 保单ID号 = rowData['保单ID号']
+            const 责任名称 = rowData['责任名称']
+            const 责任原文 = rowData['责任原文']
+            const 是否必选 = rowData['是否必选'] || '可选'
+            
+            if (!保单ID号 || !责任名称 || !责任原文) {
+              continue
+            }
+            
+            // 解析JSON（如果有）
+            let parsedResult: any = {
+              序号: 序号 ? parseInt(String(序号)) : null, // 读取Excel中的序号
+              保单ID号,
+              责任类型,
+              责任名称,
+              责任原文,
+              是否必选
+            }
+            
+            try {
+              const jsonStr = rowData['解析结果JSON']
+              if (jsonStr) {
+                const jsonData = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr
+                parsedResult = {
+                  ...jsonData,
+                  // 确保序号使用Excel中的值（优先级最高）
+                  序号: 序号 ? parseInt(String(序号)) : jsonData.序号,
+                  // 确保"是否必选"不会被JSON覆盖
+                  是否必选: 是否必选 || jsonData.是否必选
+                }
+              }
+            } catch (e) {
+              // JSON解析失败，使用基本字段
+            }
+            
+            // 最后确保"是否必选"字段存在
+            if (!parsedResult.是否必选) {
+              parsedResult.是否必选 = 是否必选
+            }
+            // 最后确保序号字段存在
+            if (!parsedResult.序号 && 序号) {
+              parsedResult.序号 = parseInt(String(序号))
+            }
+            
+            allCases.push(parsedResult)
+          } catch (error: any) {
+            console.error(`第${rowNum}行处理失败:`, error.message)
+          }
+        }
+      }
+      
+      console.log(`✅ 共收集到 ${allCases.length} 条数据`)
+      
+      // 打印前3条数据用于调试
+      console.log('前3条数据示例:')
+      allCases.slice(0, 3).forEach((item, index) => {
+        console.log(`\n第${index + 1}条:`)
+        console.log('  保单ID号:', item.保单ID号)
+        console.log('  责任类型:', item.责任类型)
+        console.log('  责任名称:', item.责任名称)
+        console.log('  责任原文:', item.责任原文?.substring(0, 50) + '...')
+      })
+      
+      // 调用后端导入API（增加超时时间）
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 600000) // 10分钟超时
+      
+      const response = await fetch('/api/coverage-library/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          cases: allCases,
+          batchInfo: {
+            source: 'excel_import',
+            importTime: new Date().toISOString()
+          }
+        }),
+        signal: controller.signal
+      })
+      
+      clearTimeout(timeoutId)
+      
+      const result = await response.json()
+      
+      message.destroy()
+      
+      if (result.success) {
+        message.success(`导入成功！共导入 ${result.data?.count || 0} 条数据`)
+        loadData() // 重新加载数据
+      } else {
+        message.error(`导入失败: ${result.message}`)
+      }
+    } catch (error: any) {
+      message.destroy()
+      if (error.name === 'AbortError') {
+        message.error('导入超时（超过10分钟），建议联系管理员分批导入')
+      } else {
+        message.error(`导入失败: ${error.message}`)
+      }
+    }
+  }
+
   const handleViewDetail = (record: CoverageItem) => {
     setSelectedItem(record)
     setDetailVisible(true)
   }
 
+  // 打开审核弹窗
   // 从parsedResult和note中提取字段的辅助函数
   const extractFieldFromNote = (note: string, fieldName: string): string | undefined => {
     if (!note) return undefined
@@ -316,6 +518,29 @@ export default function CoverageLibraryPage() {
         return 责任名称.toString().toLowerCase().includes(value.toLowerCase())
       },
       filteredValue: filters.责任名称 ? [filters.责任名称] : null
+    },
+    {
+      title: '是否必选',
+      dataIndex: 'isRequired',
+      key: 'isRequired',
+      width: 100,
+      filters: [
+        { text: '必选', value: '必选' },
+        { text: '可选', value: '可选' }
+      ],
+      filteredValue: filters.isRequired ? [filters.isRequired] : null,
+      onFilter: (value: any, record: CoverageItem) => {
+        const isRequired = record.isRequired || '可选'
+        return isRequired === value
+      },
+      render: (text: string) => {
+        const isRequired = text || '可选'
+        return (
+          <Tag color={isRequired === '必选' ? 'red' : 'default'}>
+            {isRequired}
+          </Tag>
+        )
+      }
     }
     ]
 
@@ -371,6 +596,19 @@ export default function CoverageLibraryPage() {
           title: '赔付次数',
           dataIndex: '赔付次数',
           key: '赔付次数',
+          filters: [
+            { text: '1次', value: '1次' },
+            { text: '最多2次', value: '最多2次' },
+            { text: '最多3次', value: '最多3次' },
+            { text: '最多4次', value: '最多4次' },
+            { text: '最多5次', value: '最多5次' },
+            { text: '最多6次', value: '最多6次' }
+          ],
+          filteredValue: filters.赔付次数 ? [filters.赔付次数] : null,
+          onFilter: (value, record) => {
+            const payoutCount = record.赔付次数 || '1次'
+            return payoutCount === value
+          },
           render: (text) => text || '1次' // 确保有默认值
         },
         {
@@ -728,37 +966,82 @@ export default function CoverageLibraryPage() {
       ]
     }
 
-    // 添加审核状态和操作列
+    // 添加最后3个列：解析结果JSON、审批结果、审批备注
     const actionColumns: ColumnsType<CoverageItem> = [
       {
-        title: '审核状态',
-        dataIndex: 'verified',
-        key: 'verified',
-        filters: [
-          { text: '已审核', value: true },
-          { text: '未审核', value: false }
-        ],
-        filteredValue: filters.是否已审核 !== '' ? (filters.是否已审核 === 'true' ? [true] : [false]) : null,
-        onFilter: (value, record) => record.verified === value,
-        render: (verified) => verified ? (
-          <Tag icon={<CheckCircleOutlined />} color="success">已审核</Tag>
-        ) : (
-          <Tag icon={<CloseCircleOutlined />} color="default">未审核</Tag>
-        )
+        title: '解析结果JSON',
+        dataIndex: 'parsedResult',
+        key: 'parsedResult',
+        width: 120,
+        align: 'center',
+        render: (parsedResult, record) => {
+          if (!parsedResult) return '-'
+          return (
+            <Button
+              type="link"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                Modal.info({
+                  title: `解析结果 - ${record.责任名称}`,
+                  width: 800,
+                  content: (
+                    <pre style={{ 
+                      maxHeight: '600px', 
+                      overflow: 'auto',
+                      background: '#f5f5f5',
+                      padding: '16px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      lineHeight: '1.5'
+                    }}>
+                      {JSON.stringify(parsedResult, null, 2)}
+                    </pre>
+                  )
+                })
+              }}
+            >
+              查看
+            </Button>
+          )
+        }
       },
       {
-        title: '操作',
-        key: 'action',
-        fixed: 'right',
-        render: (_, record) => (
-          <Button
-            type="link"
-            icon={<EyeOutlined />}
-            onClick={() => handleViewDetail(record)}
-          >
-            查看
-          </Button>
-        )
+        title: '审批结果',
+        dataIndex: 'reviewStatus',
+        key: 'reviewStatus',
+        width: 100,
+        filters: [
+          { text: '待审核', value: 'pending' },
+          { text: '已通过', value: 'approved' },
+          { text: '未通过', value: 'rejected' }
+        ],
+        render: (reviewStatus) => {
+          const status = reviewStatus || 'pending'
+          if (status === 'approved') {
+            return <Tag icon={<CheckCircleOutlined />} color="success">已通过</Tag>
+          } else if (status === 'rejected') {
+            return <Tag icon={<CloseCircleOutlined />} color="error">未通过</Tag>
+          } else {
+            return <Tag color="default">待审核</Tag>
+          }
+        }
+      },
+      {
+        title: '审批备注',
+        dataIndex: 'reviewNotes',
+        key: 'reviewNotes',
+        width: 200,
+        ellipsis: true,
+        render: (reviewNotes) => {
+          if (!reviewNotes) return '-'
+          return (
+            <Tooltip title={reviewNotes}>
+              <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {reviewNotes}
+              </div>
+            </Tooltip>
+          )
+        }
       }
     ]
 
@@ -769,12 +1052,31 @@ export default function CoverageLibraryPage() {
 
   // 处理表格筛选变化
   const handleTableChange = (pagination: any, tableFilters: any, sorter: any) => {
+    console.log('📊 表格变化:', { pagination, tableFilters, sorter })
+    
     // 更新分页
     const newPagination = {
       current: pagination.current,
       pageSize: pagination.pageSize
     }
     setPagination(newPagination)
+    
+    // 处理排序
+    if (sorter && sorter.field) {
+      const newSortBy = sorter.field
+      const newSortOrder = sorter.order === 'ascend' ? 'asc' : sorter.order === 'descend' ? 'desc' : 'asc'
+      
+      console.log('🔄 排序变化:', { sortBy: newSortBy, sortOrder: newSortOrder })
+      
+      // 更新filters中的排序字段
+      setFilters({
+        ...filters,
+        sortBy: newSortBy,
+        sortOrder: newSortOrder
+      })
+      
+      return // 排序时直接返回，让useEffect自动重新加载数据
+    }
     
     // 更新筛选条件（从表格列头筛选）
     const newFilters: any = { ...filters }
@@ -793,11 +1095,25 @@ export default function CoverageLibraryPage() {
       newFilters.责任名称 = ''
     }
     
+    // 是否必选筛选
+    if (tableFilters['isRequired'] && tableFilters['isRequired'].length > 0) {
+      newFilters.isRequired = tableFilters['isRequired'][0]
+    } else {
+      newFilters.isRequired = ''
+    }
+    
     // 责任类型筛选
     if (tableFilters['责任类型'] && tableFilters['责任类型'].length > 0) {
       newFilters.责任类型 = tableFilters['责任类型'][0]
     } else {
       newFilters.责任类型 = ''
+    }
+    
+    // 赔付次数筛选
+    if (tableFilters['赔付次数'] && tableFilters['赔付次数'].length > 0) {
+      newFilters.赔付次数 = tableFilters['赔付次数'][0]
+    } else {
+      newFilters.赔付次数 = ''
     }
     
     // 重复赔付筛选
@@ -870,7 +1186,16 @@ export default function CoverageLibraryPage() {
             gap: '8px'
           }}>
             <Space>
-              <Button icon={<ImportOutlined />}>导入</Button>
+              <Upload
+                accept=".xlsx,.xls"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  handleImport(file)
+                  return false // 阻止自动上传
+                }}
+              >
+                <Button icon={<ImportOutlined />}>导入</Button>
+              </Upload>
               <Button icon={<ExportOutlined />} onClick={handleExport}>导出</Button>
             </Space>
           </div>
@@ -1148,15 +1473,41 @@ export default function CoverageLibraryPage() {
           border: 'none',
           background: 'rgba(255, 255, 255, 0.7)',
           backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)'
+          WebkitBackdropFilter: 'blur(12px)',
+          minHeight: '400px'  // 确保卡片有最小高度
         }}>
+        {console.log('🎨 渲染Table组件')}
+        {console.log('   - data.length:', data.length)}
+        {console.log('   - total:', total)}
+        {console.log('   - loading:', loading)}
+        {console.log('   - columns.length:', columns.length)}
+        {data.length > 0 && console.log('   - 数据示例:', data.slice(0, 2))}
+        
+        {/* 筛选结果数量显示 */}
+        <div style={{ 
+          padding: '12px 16px',
+          marginBottom: '12px',
+          borderBottom: '1px solid #f0f0f0',
+          color: '#666',
+          fontSize: '14px'
+        }}>
+          筛选结果：<span style={{ 
+            fontWeight: 600, 
+            color: total === 0 ? '#999' : '#01BCD6',
+            fontSize: '16px'
+          }}>{total}</span> 条
+        </div>
+        
         <Table
           columns={columns}
           dataSource={data}
           loading={loading}
           rowKey="id"
-          scroll={{ x: 'max-content' }}
+          scroll={{ x: 'max-content', y: 600 }}
           onChange={handleTableChange}
+          locale={{
+            emptyText: '暂无数据'
+          }}
           pagination={{
             current: pagination.current,
             pageSize: pagination.pageSize,
@@ -1164,6 +1515,7 @@ export default function CoverageLibraryPage() {
             showSizeChanger: true,
             showTotal: (total) => `共 ${total} 条`,
             onChange: (page, pageSize) => {
+              console.log('📄 分页变化:', page, pageSize)
               setPagination({ current: page, pageSize })
             }
           }}

@@ -88,6 +88,8 @@ router.get('/', async (req, res) => {
       保单ID号,
       责任类型,
       责任名称,
+      isRequired,
+      赔付次数,
       是否可以重复赔付,
       是否分组,
       是否豁免,
@@ -96,13 +98,15 @@ router.get('/', async (req, res) => {
       sortOrder = 'asc'
     } = req.query;
 
-    console.log('收到请求:', { page, pageSize, 保单ID号, 责任类型, 责任名称 });
+    console.log('收到请求:', { page, pageSize, 保单ID号, 责任类型, 责任名称, isRequired, 赔付次数, sortBy, sortOrder });
 
     // 清理空字符串，转换为undefined
     const cleanFilters: any = {};
     if (保单ID号 && 保单ID号 !== '') cleanFilters.保单ID号 = 保单ID号 as string;
     if (责任类型 && 责任类型 !== '') cleanFilters.责任类型 = 责任类型 as string;
     if (责任名称 && 责任名称 !== '') cleanFilters.责任名称 = 责任名称 as string;
+    if (isRequired && isRequired !== '') cleanFilters.isRequired = isRequired as string;
+    if (赔付次数 && 赔付次数 !== '') cleanFilters.赔付次数 = 赔付次数 as string;
     if (是否可以重复赔付 === 'true') cleanFilters.是否可以重复赔付 = true;
     else if (是否可以重复赔付 === 'false') cleanFilters.是否可以重复赔付 = false;
     if (是否分组 === 'true') cleanFilters.是否分组 = true;
@@ -237,7 +241,7 @@ router.get('/export', async (req, res) => {
       
       // 设置表头
       const headers = [
-        '序号', '保单ID号', '责任名称', '责任原文', '自然语言描述', 
+        '序号', '保单ID号', '责任名称', '是否必选', '责任原文', '自然语言描述', 
         '赔付金额', '赔付次数', '是否可以重复赔付', '是否分组', 
         '间隔期', '是否豁免', '审核状态', '解析结果JSON'
       ];
@@ -297,9 +301,10 @@ router.get('/export', async (req, res) => {
             }
             
             const row: any = {
-              '序号': item.序号 || '',
-              '保单ID号': item.保单ID号 || '',
+              '序号': item.序号 || item.parsedResult?.序号 || '(无)',
+              '保单ID号': item.保单ID号 || item.parsedResult?.保单ID号 || '',
               '责任名称': item.责任名称 || item.coverageName || '',
+              '是否必选': item.isRequired || '可选',
               '责任原文': item.责任原文 || item.clauseText || '',
               '自然语言描述': naturalLanguageDesc,
               '赔付金额': payoutAmount,
@@ -396,31 +401,55 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
- * 标记为已验证
- * POST /api/coverage-library/:id/verify
+ * 审核责任（通过/不通过）
+ * POST /api/coverage-library/:id/review
  */
-router.post('/:id/verify', async (req, res) => {
+router.post('/:id/review', async (req, res) => {
   try {
-    const { verifiedBy } = req.body;
+    const { reviewStatus, reviewNotes, reviewedBy } = req.body;
 
-    if (!verifiedBy) {
+    // 验证必填参数
+    if (!reviewStatus || !reviewedBy) {
       return res.status(400).json({
         success: false,
-        message: '缺少verifiedBy参数'
+        message: '缺少必填参数：reviewStatus 和 reviewedBy'
       });
     }
 
-    const coverage = await coverageLibraryStorage.markAsVerified(
+    // 验证审核状态
+    if (!['approved', 'rejected'].includes(reviewStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'reviewStatus 必须是 approved 或 rejected'
+      });
+    }
+
+    // 如果是不通过，必须填写备注
+    if (reviewStatus === 'rejected' && !reviewNotes) {
+      return res.status(400).json({
+        success: false,
+        message: '审核不通过时必须填写备注说明原因'
+      });
+    }
+
+    // 更新审核状态
+    const coverage = await coverageLibraryStorage.updateReviewStatus(
       Number(req.params.id),
-      verifiedBy
+      {
+        reviewStatus,
+        reviewNotes: reviewNotes || null,
+        reviewedBy,
+        reviewedAt: new Date()
+      }
     );
 
     res.json({
       success: true,
-      data: coverage
+      data: coverage,
+      message: reviewStatus === 'approved' ? '审核通过' : '标记为不通过'
     });
   } catch (error: any) {
-    console.error('标记验证失败:', error);
+    console.error('审核失败:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -493,7 +522,7 @@ router.get('/stats/summary', async (req, res) => {
 });
 
 /**
- * 导入解析结果JSON
+ * 导入解析结果JSON（完全覆盖模式）
  * POST /api/coverage-library/import
  */
 router.post('/import', async (req, res) => {
@@ -507,11 +536,30 @@ router.post('/import', async (req, res) => {
       });
     }
 
+    console.log('📋 Excel中共有 ' + cases.length + ' 条责任');
+    console.log('🗑️  第1步：清空责任库（保留产品库）...');
+    
+    // 导入前清空所有数据
+    await coverageLibraryStorage.clearAll();
+    
+    console.log('📥 第2步：批量插入责任...');
     const result = await coverageLibraryStorage.importFromJson(cases, batchInfo);
 
+    console.log(`✅ 导入完成: 成功 ${result.success} 条，失败 ${result.failed} 条`);
+    
+    // 验证数据库中的实际记录数
+    const prisma = require('../prisma').default;
+    const finalCount = await prisma.insuranceCoverageLibrary.count();
+    console.log(`🔍 验证：数据库中现有 ${finalCount} 条责任记录`);
+    
+    // 🔄 自动更新产品库的责任数量
+    console.log('🔄 第3步：更新产品库的责任数量...');
+    await updateProductResponsibilityCounts(prisma);
+    console.log('✅ 产品库责任数量已更新');
+    
     res.json({
       success: true,
-      message: `成功导入${result.count}条责任`,
+      message: `成功导入${result.success}条责任（数据库实际：${finalCount}条）`,
       data: result
     });
   } catch (error: any) {
@@ -523,6 +571,82 @@ router.post('/import', async (req, res) => {
   }
 });
 
+
+/**
+ * 从责任库重新统计责任数量并更新到产品库
+ */
+async function updateProductResponsibilityCounts(prisma: any) {
+  try {
+    // 获取所有责任库记录
+    const allCoverages = await prisma.insuranceCoverageLibrary.findMany({
+      select: {
+        policyIdNumber: true,
+        coverageType: true
+      }
+    });
+
+    console.log(`  📊 共找到 ${allCoverages.length} 条责任记录`);
+
+    // 按保单ID号分组统计
+    const countsByPolicyId: { [key: string]: { diseaseCount: number, deathCount: number, accidentCount: number, annuityCount: number } } = {};
+
+    for (const coverage of allCoverages) {
+      const policyId = coverage.policyIdNumber;
+      if (!policyId) continue;
+
+      if (!countsByPolicyId[policyId]) {
+        countsByPolicyId[policyId] = {
+          diseaseCount: 0,
+          deathCount: 0,
+          accidentCount: 0,
+          annuityCount: 0
+        };
+      }
+
+      // 根据责任类型累加
+      if (coverage.coverageType === '疾病责任') {
+        countsByPolicyId[policyId].diseaseCount++;
+      } else if (coverage.coverageType === '身故责任') {
+        countsByPolicyId[policyId].deathCount++;
+      } else if (coverage.coverageType === '意外责任') {
+        countsByPolicyId[policyId].accidentCount++;
+      } else if (coverage.coverageType === '年金责任') {
+        countsByPolicyId[policyId].annuityCount++;
+      }
+    }
+
+    console.log(`  📊 找到 ${Object.keys(countsByPolicyId).length} 个产品需要更新责任数量`);
+
+    // 更新产品库
+    let updatedCount = 0;
+    for (const [policyId, counts] of Object.entries(countsByPolicyId)) {
+      const product = await prisma.insuranceProduct.findFirst({
+        where: { policyId: policyId }
+      });
+
+      if (product) {
+        await prisma.insuranceProduct.update({
+          where: { id: product.id },
+          data: {
+            diseaseCount: counts.diseaseCount,
+            deathCount: counts.deathCount,
+            accidentCount: counts.accidentCount,
+            annuityCount: counts.annuityCount
+          }
+        });
+        updatedCount++;
+        if (updatedCount <= 5) {
+          console.log(`    ✓ 更新产品 ${policyId}: 疾病${counts.diseaseCount}|身故${counts.deathCount}|意外${counts.accidentCount}|年金${counts.annuityCount}`);
+        }
+      }
+    }
+
+    console.log(`  ✅ 成功更新 ${updatedCount} 个产品的责任数量`);
+  } catch (error: any) {
+    console.error('  ❌ 重新统计责任数量失败:', error.message);
+    // 不抛出错误，避免影响主流程
+  }
+}
 
 export { router as coverageLibraryRouter };
 

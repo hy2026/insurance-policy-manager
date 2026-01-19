@@ -116,7 +116,7 @@ export default function PolicyManagerHomePage() {
             color: '#1f2937',
             margin: 0
           }}>
-            我家的保单
+            我的家庭保单
           </h1>
           <p style={{
             fontSize: '14px',
@@ -255,7 +255,7 @@ export default function PolicyManagerHomePage() {
             {displayPolicies.map(policy => {
               const currentYear = new Date().getFullYear()
               const endYear = policy.coverageEndYear || policy.policyInfo?.coverageEndYear
-              const isActive = !endYear || endYear === '终身' || parseInt(String(endYear)) >= currentYear
+              const isActive = !endYear || endYear === '终身' || endYear === 'lifetime' || parseInt(String(endYear)) >= currentYear
               
               return (
               <div
@@ -409,7 +409,10 @@ export default function PolicyManagerHomePage() {
                         const paymentPeriod = policy.totalPaymentPeriod ?? policy.paymentPeriod ?? policy.policyInfo?.totalPaymentPeriod;
                         if (!paymentPeriod || paymentPeriod === 'lifetime') return '终身';
                         if (paymentPeriod === null || paymentPeriod === undefined) return '未填写';
-                        return `${paymentPeriod}年`;
+                        // 如果已经包含"年"字，直接返回，否则添加"年"
+                        return typeof paymentPeriod === 'string' && paymentPeriod.includes('年') 
+                          ? paymentPeriod 
+                          : `${paymentPeriod}年`;
                       })()
                     }</div>
                     <div><strong>年交保费：</strong>¥{(policy.annualPremium || policy.policyInfo?.annualPremium || 0).toLocaleString()}</div>
@@ -452,7 +455,7 @@ export default function PolicyManagerHomePage() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
                     <div><strong>保障责任：</strong>{policy.coverages?.length || 0}项</div>
-                  <div><strong>基本保额：</strong>{((policy.basicSumInsured || policy.policyInfo?.basicSumInsured || 0) / 10000).toFixed(2)}万元</div>
+                  <div><strong>基本保额：</strong>{((policy.basicSumInsured || policy.policyInfo?.basicSumInsured || 0) / 10000).toFixed(0)}万元</div>
                   </div>
                 </div>
               </div>

@@ -7,6 +7,7 @@ import CoverageParserPage from './pages/CoverageParserPage'
 import PolicyListPage from './pages/PolicyListPage'
 import ProductLibraryPage from './pages/ProductLibraryPage'
 import DiagnosisPage from './pages/DiagnosisPage'
+import RecommendationPage from './pages/RecommendationPage'
 import DataAnnotationPage from './pages/DataAnnotationPage'
 import FormulaEditorDemoPage from './pages/FormulaEditorDemoPage'
 import CoverageLibraryPage from './pages/CoverageLibraryPage'
@@ -20,6 +21,7 @@ function App() {
         <Route path="/my-policies" element={<PolicyManagerHomePage />} />
       <Route path="/smart-input" element={<SmartInputPage />} />
         <Route path="/diagnosis" element={<DiagnosisPage />} />
+        <Route path="/recommendation" element={<RecommendationPage />} />
         <Route path="/products" element={<ProductLibraryPage />} />
         <Route path="/coverage-library" element={<CoverageLibraryPage />} />
       

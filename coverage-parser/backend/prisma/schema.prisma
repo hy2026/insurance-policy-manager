@@ -24,19 +24,43 @@ model User {
 // 保险产品库（系统预置）
 model InsuranceProduct {
   id                  Int      @id @default(autoincrement())
-  insuranceCompany    String
-  productName         String
-  policyType          String   // 重疾险/人寿险/意外险/年金险
   
-  // 新增：用于训练数据管理
-  policyDocumentId    String?  // 保单文件编号（如：东吴人寿[2018]疾病保险092号）
+  // 基本信息（对应Excel列）
+  policyId            String?  @unique // 保险产品ID号（如：粤寿保险约字[2009]年金保险013号）
+  insuranceCompany    String   // 公司名称
+  productName         String   // 保险产品名称
+  productCategory     String?  // 保险大类：人寿险/疾病险/意外险/年金险
+  productSubCategory  String?  // 保险小类：重大疾病保险/定期寿险/etc
+  coveragePeriod      String?  // 保障期限：1年/终身/至XX岁
+  paymentPeriod       String?  // 交费期限：1年/10年/20年
+  salesStatus         String   @default("在售") // 销售状态：在售/停售/停用
+  
+  // 责任统计
+  diseaseCount        Int?     // 疾病责任数
+  deathCount          Int?     // 身故责任数
+  accidentCount       Int?     // 意外责任数
+  annuityCount        Int?     // 年金责任数
+  
+  // 旧字段（保留兼容）
+  policyType          String   // 重疾险/人寿险/意外险/年金险（从productCategory映射）
+  policyDocumentId    String?  // 保单文件编号（与policyId可以相同）
   approvalDate        DateTime? @db.Date // 合同审批上架时间
   
-  productInfo         Json?    // 产品基础信息
+  productInfo         Json?    // 产品基础信息（扩展字段）
   coverages           Json?    // 责任列表（预置）
   
   isActive            Boolean  @default(true)
-  verified            Boolean  @default(false) // 是否已审核
+  verified            Boolean  @default(false) // 是否已审核（保留兼容）
+  
+  // 数据来源
+  source              String   @default("imported") // imported=Excel导入 | auto_generated=责任库自动生成
+  
+  // 审核信息（新）
+  reviewStatus        String   @default("pending") // pending/approved/rejected
+  reviewNotes         String?  @db.Text // 审核备注
+  reviewedBy          String?  // 审核人
+  reviewedAt          DateTime? // 审核时间
+  
   trainingStatus      String   @default("pending") // pending/annotated/trained/deployed
   
   createdAt           DateTime @default(now())
@@ -45,9 +69,10 @@ model InsuranceProduct {
   // 关联到责任库
   coverageDetails     InsuranceCoverageLibrary[]
 
-  @@unique([insuranceCompany, productName])
-  @@index([policyType])
+  @@index([policyId])
   @@index([insuranceCompany])
+  @@index([productCategory])
+  @@index([salesStatus])
   @@index([trainingStatus])
   @@map("insurance_product_library")
 }
@@ -92,12 +117,13 @@ model InsuranceCoverageLibrary {
   id                  Int       @id @default(autoincrement())
   
   // 关联产品
-  productId           Int
-  product             InsuranceProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId           Int?
+  product             InsuranceProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
   
   // 责任分类
   coverageType        String    // 疾病责任/身故责任/意外责任/年金责任/满期责任/生存金/其他
   coverageName        String
+  isRequired          String    @default("可选") // 可选/必选
   diseaseCategory     String?   // 重症/中症/轻症/特殊疾病/其他（仅疾病责任）
   
   // 原文和解析结果
@@ -107,7 +133,15 @@ model InsuranceCoverageLibrary {
   // 解析元数据
   parseMethod         String    @default("llm") // manual/llm/rule/hybrid
   confidenceScore     Float?    // 置信度（0-1）
-  verified            Boolean   @default(false) // 是否已人工审核
+  verified            Boolean   @default(false) // 是否已人工审核（保留兼容）
+  
+  // 审核信息（新）
+  reviewStatus        String    @default("pending") // pending/approved/rejected
+  reviewNotes         String?   @db.Text // 审核备注
+  reviewedBy          String?   // 审核人
+  reviewedAt          DateTime? // 审核时间
+  
+  // 旧字段（保留兼容）
   verifiedBy          String?
   verifiedAt          DateTime?
   
@@ -116,6 +150,8 @@ model InsuranceCoverageLibrary {
   annotationQuality   String?   // high/medium/low
   
   // 快速查询字段（从parsedResult中提取，用于提升查询性能）
+  policyIdNumber       String?   // 保单ID号（从parsedResult中提取）
+  sequenceNumber       Int?      // 序号（从parsedResult中提取）
   payoutCount          String?   // "1次" | "最多3次" | null (null表示一次赔付不涉及)
   isRepeatablePayout   Boolean?  // true | false | null (null表示一次赔付不涉及)
   isGrouped            Boolean?  // true | false | null (null表示一次赔付不涉及)
@@ -128,6 +164,8 @@ model InsuranceCoverageLibrary {
   @@index([productId])
   @@index([coverageType])
   @@index([isTrainingSample, verified])
+  @@index([policyIdNumber])
+  @@index([sequenceNumber])
   @@index([payoutCount])
   @@index([isRepeatablePayout])
   @@index([isGrouped])

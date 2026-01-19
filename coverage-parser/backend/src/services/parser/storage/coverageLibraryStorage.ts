@@ -55,6 +55,8 @@ export class CoverageLibraryStorage {
    * 使用HardRuleParser的规则，确保与解析时一致
    */
   private extractFieldsForColumns(data: CoverageLibraryData): {
+    policyIdNumber?: string | null;
+    sequenceNumber?: number | null;
     payoutCount?: string | null;
     isRepeatablePayout?: boolean | null;
     isGrouped?: boolean | null;
@@ -64,6 +66,10 @@ export class CoverageLibraryStorage {
     const parsedResult = data.parsedResult || {};
     const note = parsedResult.note || '';
     const clauseText = data.clauseText || '';
+    
+    // 提取保单ID号和序号（优化后的新字段）
+    const policyIdNumber = parsedResult.保单ID号 || parsedResult.产品编码 || null;
+    const sequenceNumber = parsedResult.序号 ? parseInt(parsedResult.序号) : null;
     
     // 使用HardRuleParser提取字段（与解析时使用相同的规则）
     const hardRuleFields = HardRuleParser.parseAdditionalFields(note || clauseText);
@@ -135,6 +141,8 @@ export class CoverageLibraryStorage {
     }
     
     return {
+      policyIdNumber,
+      sequenceNumber,
       payoutCount,
       isRepeatablePayout,
       isGrouped,
@@ -177,6 +185,7 @@ export class CoverageLibraryStorage {
 
   /**
    * 分页查询责任（支持筛选、排序）
+   * 优化版：全部使用数据库层面的筛选、排序、分页
    */
   async findWithPagination(options: {
     page: number;
@@ -185,6 +194,8 @@ export class CoverageLibraryStorage {
       保单ID号?: string;
       责任类型?: string;
       责任名称?: string;
+      isRequired?: string;
+      赔付次数?: string;
       是否可以重复赔付?: boolean;
       是否分组?: boolean;
       是否豁免?: boolean;
@@ -195,143 +206,108 @@ export class CoverageLibraryStorage {
   }) {
     const { page, pageSize, filters = {}, sortBy = '序号', sortOrder = 'asc' } = options;
 
-    // 构建where条件（只用于数据库查询的字段）
+    // 构建where条件（全部使用数据库列）
     const where: any = {};
 
-    // 注意：保单ID号在parsedResult中，需要先查询所有数据，然后在内存中筛选
-    // 但为了性能，我们先用其他可用的字段筛选
-
+    // 责任类型筛选
     if (filters.责任类型) {
-      // 支持新旧两种格式：疾病责任 <-> 疾病类
       const typeMapping: { [key: string]: string[] } = {
         '疾病责任': ['疾病责任', '疾病类'],
         '身故责任': ['身故责任', '身故类'],
         '意外责任': ['意外责任', '意外类'],
         '年金责任': ['年金责任', '年金类']
       };
-      
       const typesToQuery = typeMapping[filters.责任类型] || [filters.责任类型];
-      where.coverageType = {
-        in: typesToQuery
-      };
+      where.coverageType = { in: typesToQuery };
     }
 
+    // 责任名称筛选
     if (filters.责任名称) {
-      where.coverageName = {
-        contains: filters.责任名称
-      };
+      where.coverageName = { contains: filters.责任名称 };
     }
 
-    if (filters.是否已审核 !== undefined) {
-      where.verified = filters.是否已审核;
+    // 是否必选筛选
+    if (filters.isRequired) {
+      where.isRequired = filters.isRequired;
     }
 
-    // 使用数据库列进行筛选（提升性能）
+    // 保单ID号筛选（现在使用数据库列）
+    if (filters.保单ID号) {
+      where.policyIdNumber = { contains: filters.保单ID号 };
+    }
+
+    // 赔付次数筛选
+    if (filters.赔付次数) {
+      where.payoutCount = filters.赔付次数;
+    }
+
+    // 是否可以重复赔付筛选
     if (filters.是否可以重复赔付 !== undefined) {
       where.isRepeatablePayout = filters.是否可以重复赔付;
     }
 
+    // 是否分组筛选
     if (filters.是否分组 !== undefined) {
       where.isGrouped = filters.是否分组;
     }
 
+    // 是否豁免筛选
     if (filters.是否豁免 !== undefined) {
       where.isPremiumWaiver = filters.是否豁免;
     }
 
-    // 先查询总数（用于分页）
-    const total = await prisma.insuranceCoverageLibrary.count({
-      where: {
-        ...where,
-        // 保单ID号筛选需要在内存中进行（因为存储在parsedResult中）
-        // 所以先不在这里筛选，后面在内存中筛选
-      }
-    });
+    // 是否已审核筛选
+    if (filters.是否已审核 !== undefined) {
+      where.verified = filters.是否已审核;
+    }
 
-    // 查询数据（使用数据库列筛选，提升性能）
-    const allData = await prisma.insuranceCoverageLibrary.findMany({
+    // 构建排序条件（现在使用数据库列）
+    let orderBy: any = {};
+    if (sortBy === '序号') {
+      orderBy = { sequenceNumber: sortOrder };
+    } else if (sortBy === '责任名称') {
+      orderBy = { coverageName: sortOrder };
+    } else {
+      orderBy = { createdAt: 'desc' };
+    }
+
+    // 先查询总数
+    const total = await prisma.insuranceCoverageLibrary.count({ where });
+
+    console.log(`📊 数据库筛选后总数: ${total} 条`);
+
+    // 数据库层面分页查询
+    const data = await prisma.insuranceCoverageLibrary.findMany({
       where,
       include: {
         product: true
       },
-      orderBy: this.buildOrderBy(sortBy, sortOrder),
+      orderBy,
       skip: (page - 1) * pageSize,
       take: pageSize
     });
 
-    // 提取关键字段（优先使用数据库列）
-    const enrichedData = allData.map(item => {
-      try {
-        return this.enrichCoverageData(item);
-      } catch (error: any) {
-        console.error('enrichCoverageData失败:', error, item);
-        // 返回基础数据，避免整个查询失败
-        const parsedResult = item.parsedResult as any || {};
-        return {
-          ...item,
-          序号: parsedResult.序号,
-          保单ID号: parsedResult.保单ID号,
-          责任类型: parsedResult.责任类型 || item.coverageType,
-          责任名称: parsedResult.责任名称 || item.coverageName,
-          责任原文: parsedResult.责任原文 || item.clauseText,
-          赔付次数: item.payoutCount || '1次',
-          是否可以重复赔付: item.isRepeatablePayout !== null ? item.isRepeatablePayout : false,
-          是否分组: item.isGrouped !== null ? item.isGrouped : false,
-          间隔期: item.intervalPeriod || '',
-          是否豁免: item.isPremiumWaiver || false
-        };
-      }
+    console.log(`📄 返回第${page}页，共${data.length}条`);
+
+    // 提取关键字段（现在优先使用数据库列）
+    const enrichedData = data.map(item => this.enrichCoverageData(item));
+
+    // 获取已审核数量
+    const verified = await prisma.insuranceCoverageLibrary.count({
+      where: { ...where, verified: true }
     });
-
-    // 应用内存中的筛选（仅对parsedResult中的字段，如保单ID号）
-    let filteredData = enrichedData.filter(item => {
-      // 保单ID号筛选（存储在parsedResult中，需要在内存中筛选）
-      if (filters.保单ID号 && item.保单ID号 && !item.保单ID号.includes(filters.保单ID号)) {
-        return false;
-      }
-      
-      return true;
-    });
-
-    // 获取已审核数量（筛选后）
-    const verified = filteredData.filter(item => item.verified).length;
-
-    // 注意：由于保单ID号在内存中筛选，总数可能不准确
-    // 如果需要精确总数，需要先查询所有数据再筛选（性能较差）
-    // 这里使用近似值，实际总数可能略大于显示的总数
 
     return {
-      data: filteredData,
-      total: filteredData.length, // 使用筛选后的实际数量
+      data: enrichedData,
+      total,
       verified,
-      unverified: filteredData.length - verified
+      unverified: total - verified
     };
   }
 
   /**
    * 构建排序条件
    */
-  private buildOrderBy(sortBy: string, sortOrder: 'asc' | 'desc') {
-    const order: any = {};
-    
-    // 支持从parsedResult中排序的字段
-    if (sortBy === '序号') {
-      // 需要从parsedResult中提取，暂时用createdAt
-      return { createdAt: sortOrder };
-    }
-    
-    // 其他字段
-    const fieldMap: Record<string, string> = {
-      '创建时间': 'createdAt',
-      '保单ID号': 'createdAt', // 暂时用createdAt
-      '责任名称': 'coverageName'
-    };
-
-    const dbField = fieldMap[sortBy] || 'createdAt';
-    order[dbField] = sortOrder;
-    return order;
-  }
-
   /**
    * 丰富责任数据（优先使用数据库列，如果列是null则从parsedResult提取并更新）
    */
@@ -377,10 +353,11 @@ export class CoverageLibraryStorage {
 
       return {
         ...item,
-        序号: parsedResult?.序号,
-        保单ID号: parsedResult?.保单ID号,
-        责任类型: parsedResult?.责任类型 || item.coverageType,
+        序号: item.sequenceNumber !== null ? item.sequenceNumber : parsedResult?.序号, // 优先使用数据库列
+        保单ID号: item.policyIdNumber || parsedResult?.保单ID号 || parsedResult?.产品编码, // 优先使用数据库列
+        责任类型: parsedResult?.责任类型 || parsedResult?.险种类型 || item.coverageType,
         责任名称: parsedResult?.责任名称 || item.coverageName,
+        isRequired: item.isRequired || '可选', // 是否必选
         责任原文: parsedResult?.责任原文 || item.clauseText,
         naturalLanguageDesc: parsedResult?.payoutAmount?.map((p: any) => p.naturalLanguageDescription) || [],
         payoutAmount: parsedResult?.payoutAmount || [],
@@ -398,10 +375,11 @@ export class CoverageLibraryStorage {
       const parsedResult = (item?.parsedResult || {}) as any;
       return {
         ...item,
-        序号: parsedResult?.序号,
-        保单ID号: parsedResult?.保单ID号,
-        责任类型: parsedResult?.责任类型 || item?.coverageType,
+        序号: item.sequenceNumber !== null ? item.sequenceNumber : parsedResult?.序号,
+        保单ID号: item.policyIdNumber || parsedResult?.保单ID号 || parsedResult?.产品编码,
+        责任类型: parsedResult?.责任类型 || parsedResult?.险种类型 || item?.coverageType,
         责任名称: parsedResult?.责任名称 || item?.coverageName,
+        isRequired: item.isRequired || '可选',
         责任原文: parsedResult?.责任原文 || item?.clauseText,
         赔付次数: item.payoutCount || '1次',
         是否可以重复赔付: item.isRepeatablePayout !== null ? item.isRepeatablePayout : false,
@@ -434,7 +412,28 @@ export class CoverageLibraryStorage {
   }
 
   /**
-   * 从JSON导入数据
+   * 清空责任库（完全覆盖模式）
+   */
+  async clearAll() {
+    // 只清空责任库（产品库保留）
+    const deleteResult = await prisma.insuranceCoverageLibrary.deleteMany({});
+    console.log(`  ✅ 已删除 ${deleteResult.count} 条责任记录`);
+    
+    // 验证是否真的清空了
+    const remainingCount = await prisma.insuranceCoverageLibrary.count();
+    console.log(`  🔍 验证：剩余责任数 = ${remainingCount}`);
+    
+    if (remainingCount > 0) {
+      console.error(`  ❌ 警告：删除后还有 ${remainingCount} 条责任未清空！`);
+      // 强制再删一次
+      await prisma.insuranceCoverageLibrary.deleteMany({});
+      const finalCount = await prisma.insuranceCoverageLibrary.count();
+      console.log(`  🔍 二次删除后：剩余责任数 = ${finalCount}`);
+    }
+  }
+
+  /**
+   * 从JSON导入数据（完全覆盖模式 - 简化版）
    */
   async importFromJson(cases: any[], batchInfo?: any) {
     const results = [];
@@ -458,6 +457,8 @@ export class CoverageLibraryStorage {
         
         const 责任名称 = caseItem.责任名称 || caseItem['责任名称'];
         const 责任原文 = caseItem.责任原文 || caseItem['责任原文'];
+        const 序号 = caseItem.序号 || caseItem['序号'] || null;
+        const isRequired = caseItem.是否必选 || caseItem['是否必选'] || caseItem.isRequired || '可选';
         const payoutAmount = caseItem.payoutAmount || [];
         const note = caseItem.note;
 
@@ -467,41 +468,20 @@ export class CoverageLibraryStorage {
           continue;
         }
 
-        // 查找或创建产品
-        const productStorage = require('./productLibraryStorage').productLibraryStorage;
-        const insuranceCompany = 保单ID号?.match(/^(.+?)\[/)?.[1] || '未知公司';
-        const productName = 保单ID号 || '未知产品';
-
-        const product = await productStorage.findOrCreate({
-          insuranceCompany,
-          productName,
-          policyType: 'critical_illness'
-        });
-
-        // 检查是否已存在相同的责任记录（基于产品ID、责任名称和原文）
-        const existing = await prisma.insuranceCoverageLibrary.findFirst({
-          where: {
-            productId: product.id,
+        // 直接创建责任记录（不创建产品，保持独立）
+        // 注意：schema中productId是Int?，允许为null
+        const coverage = await prisma.insuranceCoverageLibrary.create({
+          data: {
+            coverageType: 责任类型,
             coverageName: 责任名称,
-            clauseText: 责任原文
+            isRequired: isRequired,
+            clauseText: 责任原文,
+            parsedResult: caseItem,
+            parseMethod: 'imported',
+            verified: false,
+            policyIdNumber: 保单ID号,
+            sequenceNumber: 序号 ? parseInt(序号.toString()) : null
           }
-        });
-
-        if (existing) {
-          // 如果已存在，跳过导入
-          console.log(`跳过重复记录: 保单ID号=${保单ID号}, 责任名称=${责任名称}`);
-          continue;
-        }
-
-        // 创建责任记录
-        const coverage = await this.create({
-          productId: product.id,
-          coverageType: 责任类型,
-          coverageName: 责任名称,
-          clauseText: 责任原文,
-          parsedResult: caseItem, // 保存完整JSON
-          parseMethod: 'imported',
-          verified: false
         });
 
         results.push(coverage);
@@ -557,10 +537,10 @@ export class CoverageLibraryStorage {
       }
     }
 
-    // 构建where条件（只用于数据库查询的字段）
+    // 构建where条件（全部使用数据库列，与findWithPagination一致）
     const where: any = {};
 
-    // 责任类型筛选（支持新旧两种格式映射）
+    // 责任类型筛选
     if (cleanFilters.责任类型) {
       const typeMapping: { [key: string]: string[] } = {
         '疾病责任': ['疾病责任', '疾病类'],
@@ -568,18 +548,33 @@ export class CoverageLibraryStorage {
         '意外责任': ['意外责任', '意外类'],
         '年金责任': ['年金责任', '年金类']
       };
-      
       const typesToQuery = typeMapping[cleanFilters.责任类型] || [cleanFilters.责任类型];
-      where.coverageType = {
-        in: typesToQuery
-      };
+      where.coverageType = { in: typesToQuery };
     }
 
     // 责任名称筛选
     if (cleanFilters.责任名称) {
-      where.coverageName = {
-        contains: cleanFilters.责任名称
-      };
+      where.coverageName = { contains: cleanFilters.责任名称 };
+    }
+
+    // 保单ID号筛选（现在使用数据库列）
+    if (cleanFilters.保单ID号) {
+      where.policyIdNumber = { contains: cleanFilters.保单ID号 };
+    }
+
+    // 是否可以重复赔付筛选
+    if (cleanFilters.是否可以重复赔付 !== undefined) {
+      where.isRepeatablePayout = cleanFilters.是否可以重复赔付;
+    }
+
+    // 是否分组筛选
+    if (cleanFilters.是否分组 !== undefined) {
+      where.isGrouped = cleanFilters.是否分组;
+    }
+
+    // 是否豁免筛选
+    if (cleanFilters.是否豁免 !== undefined) {
+      where.isPremiumWaiver = cleanFilters.是否豁免;
     }
 
     // 是否已审核筛选
@@ -587,83 +582,30 @@ export class CoverageLibraryStorage {
       where.verified = cleanFilters.是否已审核;
     }
 
-    // 查询所有数据（先不分页，因为需要在内存中筛选parsedResult字段）
-    let allData;
-    try {
-      console.log('开始查询数据库，where条件:', JSON.stringify(where));
-      allData = await prisma.insuranceCoverageLibrary.findMany({
+    // 数据库层面查询（已筛选）
+    console.log('导出数据，where条件:', JSON.stringify(where));
+    const allData = await prisma.insuranceCoverageLibrary.findMany({
       where,
       include: {
-          product: {
-            select: {
-              id: true,
-              productName: true,
-              insuranceCompany: true,
-              policyType: true
-            }
+        product: {
+          select: {
+            id: true,
+            productName: true,
+            insuranceCompany: true,
+            policyType: true
           }
-        },
-        orderBy: {
-          createdAt: 'desc'
+        }
+      },
+      orderBy: {
+        sequenceNumber: 'asc' // 按序号排序
       }
     });
-      console.log(`数据库查询成功，获取到 ${allData.length} 条记录`);
-    } catch (dbError: any) {
-      console.error('数据库查询失败:', dbError);
-      console.error('错误堆栈:', dbError.stack);
-      throw new Error(`数据库查询失败: ${dbError.message}`);
-    }
+    console.log(`导出数据查询成功，共 ${allData.length} 条记录`);
 
-    // 提取关键字段（从parsedResult中）
-    const enrichedData = allData.map(item => {
-      try {
-        return this.enrichCoverageData(item);
-      } catch (error: any) {
-        console.error('enrichCoverageData失败:', error, item);
-        // 返回基础数据，避免整个查询失败
-        const parsedResult = item.parsedResult as any || {};
-        return {
-          ...item,
-          序号: parsedResult.序号,
-          保单ID号: parsedResult.保单ID号,
-          责任类型: parsedResult.责任类型 || item.coverageType,
-          责任名称: parsedResult.责任名称 || item.coverageName,
-          责任原文: parsedResult.责任原文 || item.clauseText,
-          赔付次数: '1次',
-          是否可以重复赔付: false,
-          是否分组: false,
-          间隔期: undefined,
-          是否豁免: false
-        };
-      }
-    });
+    // 提取关键字段
+    const enrichedData = allData.map(item => this.enrichCoverageData(item));
 
-    // 应用内存中的筛选（对于从parsedResult提取的字段）
-    const filteredData = enrichedData.filter(item => {
-      // 保单ID号筛选
-      if (cleanFilters.保单ID号 && item.保单ID号 && !item.保单ID号.includes(cleanFilters.保单ID号)) {
-        return false;
-      }
-      
-      // 是否可以重复赔付筛选
-      if (cleanFilters.是否可以重复赔付 !== undefined && item.是否可以重复赔付 !== cleanFilters.是否可以重复赔付) {
-        return false;
-      }
-      
-      // 是否分组筛选
-      if (cleanFilters.是否分组 !== undefined && item.是否分组 !== cleanFilters.是否分组) {
-        return false;
-      }
-      
-      // 是否豁免筛选
-      if (cleanFilters.是否豁免 !== undefined && item.是否豁免 !== cleanFilters.是否豁免) {
-        return false;
-      }
-      
-      return true;
-    });
-
-    return filteredData;
+    return enrichedData;
   }
 
   /**
@@ -711,6 +653,36 @@ export class CoverageLibraryStorage {
         verified: true,
         verifiedBy,
         verifiedAt: new Date()
+      }
+    });
+  }
+
+  /**
+   * 更新审核状态（新审核流程）
+   */
+  async updateReviewStatus(
+    id: number,
+    reviewData: {
+      reviewStatus: string;
+      reviewNotes: string | null;
+      reviewedBy: string;
+      reviewedAt: Date;
+    }
+  ) {
+    return await prisma.insuranceCoverageLibrary.update({
+      where: { id },
+      data: {
+        reviewStatus: reviewData.reviewStatus,
+        reviewNotes: reviewData.reviewNotes,
+        reviewedBy: reviewData.reviewedBy,
+        reviewedAt: reviewData.reviewedAt,
+        // 同时更新旧字段以保持兼容
+        verified: reviewData.reviewStatus === 'approved',
+        verifiedBy: reviewData.reviewedBy,
+        verifiedAt: reviewData.reviewedAt
+      },
+      include: {
+        product: true
       }
     });
   }
@@ -814,26 +786,29 @@ export class CoverageLibraryStorage {
 
   /**
    * 获取合同统计信息（合同数量、责任总数、合同ID列表）
+   * 优化版：使用数据库列
    */
   async getContractStats() {
-    // 获取所有数据以提取保单ID号
+    // 使用数据库列直接获取唯一的保单ID号（优化后）
     const allData = await prisma.insuranceCoverageLibrary.findMany({
+      where: {
+        policyIdNumber: { not: null }
+      },
       select: {
-        parsedResult: true
+        policyIdNumber: true
       }
     });
 
     // 提取所有唯一的保单ID号
     const policyIds = new Set<string>();
     allData.forEach(item => {
-      const parsedResult = item.parsedResult as any;
-      if (parsedResult?.保单ID号) {
-        policyIds.add(parsedResult.保单ID号);
+      if (item.policyIdNumber) {
+        policyIds.add(item.policyIdNumber);
       }
     });
 
     const contractCount = policyIds.size;
-    const totalCoverageCount = allData.length;
+    const totalCoverageCount = await prisma.insuranceCoverageLibrary.count();
 
     return {
       contractCount,
@@ -843,23 +818,18 @@ export class CoverageLibraryStorage {
   }
 
   /**
-   * 按合同ID获取责任分布统计
+   * 按合同ID获取责任分布统计（优化版：使用数据库列）
    */
   async getStatsByPolicyId(policyId: string) {
-    // 查询该合同ID下的所有责任
-    const allData = await prisma.insuranceCoverageLibrary.findMany({
-      where: {},
+    // 使用数据库列直接筛选（优化后）
+    const filteredData = await prisma.insuranceCoverageLibrary.findMany({
+      where: {
+        policyIdNumber: policyId
+      },
       select: {
-        parsedResult: true,
         coverageType: true,
         verified: true
       }
-    });
-
-    // 筛选出该合同ID的责任
-    const filteredData = allData.filter(item => {
-      const parsedResult = item.parsedResult as any;
-      return parsedResult?.保单ID号 === policyId;
     });
 
     const types = ['疾病责任', '身故责任', '意外责任', '年金责任'];
@@ -881,9 +851,7 @@ export class CoverageLibraryStorage {
     for (const type of types) {
       const typesToQuery = typeMapping[type] || [type];
       const typeData = filteredData.filter(item => {
-        const parsedResult = item.parsedResult as any;
-        const coverageType = parsedResult?.责任类型 || item.coverageType;
-        return typesToQuery.includes(coverageType);
+        return typesToQuery.includes(item.coverageType);
       });
 
       const total = typeData.length;

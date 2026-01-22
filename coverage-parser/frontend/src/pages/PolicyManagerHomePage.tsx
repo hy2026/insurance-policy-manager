@@ -724,6 +724,7 @@ export default function PolicyManagerHomePage() {
               return (
               <div
                 key={policy.id}
+                id={`policy-card-${policy.id}`}
                 style={{ 
                   position: 'relative', 
                   background: 'white', 
@@ -839,22 +840,42 @@ export default function PolicyManagerHomePage() {
                   </button>
                 </div>
                 
-                {/* 详情展开区域 - 绝对定位浮层，不影响其他卡片布局 */}
+                {/* 详情展开区域 - 绝对定位浮层，智能判断左右展开方向 */}
                 {expandedPolicyId !== null && String(expandedPolicyId) === String(policy.id) && (
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: '0',
-                    marginTop: '8px',
-                    width: '750px', // 固定宽度，类似智能快录右侧
-                    maxWidth: '90vw',
-                    borderRadius: '12px',
-                    background: 'linear-gradient(135deg, #f0f9fc 0%, #e8f4f8 100%)',
-                    border: '2px solid #01BCD6',
-                    overflow: 'hidden',
-                    boxShadow: '0 12px 40px rgba(1, 188, 214, 0.25)',
-                    zIndex: 1000
-                  }}>
+                  <div 
+                    ref={(el) => {
+                      if (el) {
+                        // 检测卡片位置，决定弹窗方向
+                        const cardEl = document.getElementById(`policy-card-${policy.id}`)
+                        if (cardEl) {
+                          const rect = cardEl.getBoundingClientRect()
+                          const distanceToRight = window.innerWidth - rect.right
+                          
+                          // 如果卡片距离右边小于400px，弹窗往左展开
+                          if (distanceToRight < 400) {
+                            el.style.left = 'auto'
+                            el.style.right = '0'
+                          } else {
+                            el.style.left = '0'
+                            el.style.right = 'auto'
+                          }
+                        }
+                      }
+                    }}
+                    style={{
+                      position: 'absolute',
+                      top: '100%',
+                      marginTop: '8px',
+                      width: '750px',
+                      maxWidth: '90vw',
+                      borderRadius: '12px',
+                      background: 'linear-gradient(135deg, #f0f9fc 0%, #e8f4f8 100%)',
+                      border: '2px solid #01BCD6',
+                      overflow: 'hidden',
+                      boxShadow: '0 12px 40px rgba(1, 188, 214, 0.25)',
+                      zIndex: 1000
+                    }}
+                  >
                     {/* 详情头部 */}
                     <div style={{
                       padding: '12px 24px',

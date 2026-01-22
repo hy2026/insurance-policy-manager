@@ -719,11 +719,22 @@ export default function PolicyManagerHomePage() {
             {displayPolicies.map(policy => {
               const endYear = policy.coverageEndYear || policy.policyInfo?.coverageEndYear
               const isActive = !endYear || endYear === '终身' || endYear === 'lifetime' || parseInt(String(endYear)) >= currentYear
+              const isExpanded = String(expandedPolicyId) === String(policy.id)
               
               return (
               <div
                 key={policy.id}
-                style={{ position: 'relative', background: 'white', borderRadius: '12px', padding: '16px', border: '1px solid #f3f4f6', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', transition: 'all 0.3s' }}
+                style={{ 
+                  position: 'relative', 
+                  background: 'white', 
+                  borderRadius: '12px', 
+                  padding: '16px', 
+                  border: '1px solid #f3f4f6', 
+                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', 
+                  transition: 'all 0.3s',
+                  zIndex: isExpanded ? 100 : 1, // 展开的卡片层级最高
+                  gridColumn: isExpanded ? '1 / -1' : 'auto' // 展开时占满整行
+                }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#01BCD6'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.2)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e0e0e0'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
               >

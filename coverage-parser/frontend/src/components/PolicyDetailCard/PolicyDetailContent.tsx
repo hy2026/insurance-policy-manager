@@ -146,16 +146,20 @@ export default function PolicyDetailContent({ policy, compact = false }: PolicyD
     }
     
     policy.coverages?.forEach(c => {
-      const name = c.name || ''
-      const type = c.type || ''
+      const name = (c.name || '').toLowerCase()
+      const type = (c.type || '').toLowerCase()
+      const fullText = name + type
       
-      if (type.includes('重疾') || type.includes('重大疾病') || name.includes('重疾') || name.includes('重大疾病') || name.includes('重症')) {
+      // 更精确的分类逻辑
+      if (fullText.includes('重疾') || fullText.includes('重大疾病') || fullText.includes('严重疾病') || 
+          type.includes('重疾保险金') || type.includes('重大疾病保险金')) {
         categories['重疾责任'].push(c)
-      } else if (type.includes('中症') || name.includes('中症')) {
+      } else if (fullText.includes('中症') || type.includes('中症保险金')) {
         categories['中症责任'].push(c)
-      } else if (type.includes('轻症') || name.includes('轻症')) {
+      } else if (fullText.includes('轻症') || type.includes('轻症保险金')) {
         categories['轻症责任'].push(c)
-      } else {
+      } else if (!fullText.includes('身故') && !fullText.includes('豁免')) {
+        // 排除身故和豁免责任
         categories['其他疾病责任'].push(c)
       }
     })
@@ -165,13 +169,57 @@ export default function PolicyDetailContent({ policy, compact = false }: PolicyD
   
   const categorizedCoverages = getCoveragesByCategory()
   
-  // 计算每个大类的保额汇总
+  // 调试：输出分类结果
+  console.log('🔍 保单责任分类结果:', {
+    产品名称: policy.productName,
+    重疾责任数量: categorizedCoverages['重疾责任'].length,
+    中症责任数量: categorizedCoverages['中症责任'].length,
+    轻症责任数量: categorizedCoverages['轻症责任'].length,
+    其他疾病责任数量: categorizedCoverages['其他疾病责任'].length,
+    重疾责任列表: categorizedCoverages['重疾责任'].map(c => ({ name: c.name, type: c.type })),
+    中症责任列表: categorizedCoverages['中症责任'].map(c => ({ name: c.name, type: c.type })),
+    轻症责任列表: categorizedCoverages['轻症责任'].map(c => ({ name: c.name, type: c.type })),
+  })
+  
+  // 计算每个大类的保额汇总（智能累计）
   const calculateCategoryAmount = (coverages: Coverage[]): number => {
-    let total = 0
+    // 按责任名称分组
+    const groupedByName: { [key: string]: Coverage[] } = {}
+    
     coverages.forEach(c => {
-      const amount = getAmountInWan(c, basicSumInsured)
-      if (amount) total += amount
+      const name = c.name || ''
+      // 提取基础名称（去掉"第一次"、"第二次"等）
+      const baseName = name.replace(/第[一二三四五六七八九十]+次/g, '').trim()
+      
+      if (!groupedByName[baseName]) {
+        groupedByName[baseName] = []
+      }
+      groupedByName[baseName].push(c)
     })
+    
+    let total = 0
+    
+    // 对每个基础名称的责任进行处理
+    Object.entries(groupedByName).forEach(([baseName, covs]) => {
+      // 检查是否有"第X次"的多次赔付
+      const hasMultipleTimes = covs.some(c => /第[一二三四五六七八九十]+次/.test(c.name || ''))
+      
+      if (hasMultipleTimes) {
+        // 如果有多次赔付，只取"第一次"的金额
+        const firstTime = covs.find(c => (c.name || '').includes('第一次'))
+        if (firstTime) {
+          const amount = getAmountInWan(firstTime, basicSumInsured)
+          if (amount) total += amount
+        }
+      } else {
+        // 如果不是多次赔付（如"额外给付"等），则累计所有金额
+        covs.forEach(c => {
+          const amount = getAmountInWan(c, basicSumInsured)
+          if (amount) total += amount
+        })
+      }
+    })
+    
     return total
   }
   
@@ -180,6 +228,15 @@ export default function PolicyDetailContent({ policy, compact = false }: PolicyD
   const moderateAmount = calculateCategoryAmount(categorizedCoverages['中症责任'])
   const mildAmount = calculateCategoryAmount(categorizedCoverages['轻症责任'])
   const otherAmount = calculateCategoryAmount(categorizedCoverages['其他疾病责任'])
+  
+  console.log('💰 各类责任金额:', {
+    产品名称: policy.productName,
+    基本保额: basicSumInsured / 10000,
+    重疾金额: criticalAmount,
+    中症金额: moderateAmount,
+    轻症金额: mildAmount,
+    其他疾病金额: otherAmount,
+  })
   
   // 主保额（基本保额）
   const mainAmount = basicSumInsured / 10000

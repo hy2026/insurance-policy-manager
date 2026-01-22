@@ -1197,7 +1197,8 @@
           "formulaVariables": "N为赔付比例，累计给付3次，比例递增（详见下表）",
           "naturalLanguageDescription": "等待期后确诊，按基本保额赔付"
         }
-      ]
+      ],
+      "note": "累计最多赔3次"
     },
     {
       "序号": 67,

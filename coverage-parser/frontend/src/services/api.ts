@@ -436,5 +436,138 @@ export async function reviewProduct(
   return response.data || response
 }
 
+// ==================== 家庭成员/被保险人相关API ====================
+
+export interface FamilyMember {
+  id: number;
+  userId: number;
+  entity: string;  // 本人/配偶/孩子/父母
+  birthYear: number;
+  gender: string;  // 男/女
+  name?: string | null;
+  policyCount?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PersonInfoInput {
+  userId: number;
+  entity: string;  // 本人/配偶/孩子
+  birthYear: number;
+  name?: string;
+  gender?: string;
+}
+
+/**
+ * 获取用户的所有家庭成员
+ */
+export async function getFamilyMembers(userId: number = 1): Promise<FamilyMember[]> {
+  const response: any = await api.get('/insured-persons', {
+    params: { userId }
+  })
+  return response.data || []
+}
+
+/**
+ * 创建新的家庭成员
+ */
+export async function createFamilyMember(data: {
+  userId: number;
+  entity: string;
+  birthYear: number;
+  gender: string;
+  name?: string;
+}): Promise<FamilyMember> {
+  const response: any = await api.post('/insured-persons', data)
+  return response.data!
+}
+
+/**
+ * 更新家庭成员信息
+ */
+export async function updateFamilyMember(id: number, data: {
+  entity?: string;
+  birthYear?: number;
+  gender?: string;
+  name?: string;
+}): Promise<FamilyMember> {
+  const response: any = await api.put(`/insured-persons/${id}`, data)
+  return response.data!
+}
+
+/**
+ * 删除家庭成员
+ */
+export async function deleteFamilyMember(id: number): Promise<void> {
+  await api.delete(`/insured-persons/${id}`)
+}
+
+export interface PersonConflictResult {
+  hasConflict: boolean;
+  existingPerson?: {
+    id: number;
+    entity: string;
+    birthYear: number;
+    name?: string | null;
+    policies: Array<{
+      id: number;
+      productName: string;
+      policyType: string;
+      insuranceCompany: string;
+      policyStartYear: number;
+      basicSumInsured?: number | null;
+      annualPremium?: number | null;
+    }>;
+  };
+  changes?: {
+    birthYear: {
+      old: number;
+      new: number;
+      ageDifference: number;
+    };
+  };
+}
+
+/**
+ * 检测人员信息冲突
+ */
+export async function checkPersonInfoConflict(
+  personInfo: PersonInfoInput
+): Promise<PersonConflictResult> {
+  const response: any = await api.post('/insured-persons/check-conflict', personInfo)
+  return response
+}
+
+/**
+ * 获取或创建被保险人记录
+ */
+export async function getOrCreateInsuredPerson(
+  personInfo: PersonInfoInput
+): Promise<{ id: number; isNew: boolean }> {
+  const response: any = await api.post('/insured-persons/get-or-create', personInfo)
+  return response
+}
+
+/**
+ * 更新被保险人信息（影响所有关联保单）
+ * 支持旧数据更新：当 personId === -1 时，需要传入 entity 和 userId
+ */
+export async function updateInsuredPersonGlobally(
+  personId: number,
+  updates: {
+    birthYear?: number;
+    name?: string;
+    gender?: string;
+    entity?: string;  // 用于旧数据更新
+    userId?: number;  // 用于旧数据更新
+  }
+): Promise<{
+  updatedPerson: any;
+  affectedPolicies: number;
+}> {
+  const response: any = await api.put(`/insured-persons/${personId}/update-globally`, updates)
+  return response
+}
+
 export default api
 

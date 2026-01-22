@@ -324,7 +324,7 @@ export default function CoverageLibraryPage() {
                   ...jsonData,
                   // 确保序号使用Excel中的值（优先级最高）
                   序号: 序号 ? parseInt(String(序号)) : jsonData.序号,
-                  // 确保"是否必选"不会被JSON覆盖
+                // 确保"是否必选"不会被JSON覆盖
                   是否必选: 是否必选 || jsonData.是否必选
                 }
               }

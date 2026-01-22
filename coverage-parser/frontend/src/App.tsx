@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import MainLayout from './components/MainLayout'
 import HomePage from './pages/HomePage'
 import PolicyManagerHomePage from './pages/PolicyManagerHomePage'
+import FamilyEditPage from './pages/FamilyEditPage'
 import SmartInputPage from './pages/SmartInputPage'
 import CoverageParserPage from './pages/CoverageParserPage'
 import PolicyListPage from './pages/PolicyListPage'
@@ -19,6 +20,7 @@ function App() {
         {/* 主要页面 */}
         <Route path="/" element={<HomePage />} />
         <Route path="/my-policies" element={<PolicyManagerHomePage />} />
+        <Route path="/family-edit" element={<FamilyEditPage />} />
       <Route path="/smart-input" element={<SmartInputPage />} />
         <Route path="/diagnosis" element={<DiagnosisPage />} />
         <Route path="/recommendation" element={<RecommendationPage />} />

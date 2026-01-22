@@ -121,6 +121,7 @@ export interface Policy {
   paymentPeriod?: number | string
   annualPremium?: number
   basicSumInsured?: number
+  policyIdNumber?: string  // 保单ID号
   createdAt?: Date
   updatedAt?: Date
 }

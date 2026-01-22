@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { message, Modal } from 'antd'
-import { parseCoverage, addPolicy, editPolicy, getPolicyById, getProducts, getCoverageLibrary } from '@/services/api'
+import { message, Modal, Form, Select, InputNumber } from 'antd'
+import { parseCoverage, addPolicy, editPolicy, getPolicyById, getProducts, getCoverageLibrary, getOrCreateInsuredPerson, getFamilyMembers, createFamilyMember, getPolicies } from '@/services/api'
 import type { Coverage, PolicyInfo } from '@/types'
+import type { FamilyMember } from '@/services/api'
 import InsuranceCompanySelector from '@/components/InsuranceCompanySelector'
+import ProductIdSelector from '@/components/ProductIdSelector'
 
 const POLICY_TYPES = [
   { value: 'annuity', label: '年金险' },
@@ -19,7 +21,8 @@ const COVERAGE_TYPES = [
   { value: 'annuity', label: '年金责任' },
 ]
 
-const INSURED_PERSONS = ['本人', '配偶', '子女1', '子女2']
+// 称谓选项（用于新增家庭成员）
+const ENTITY_OPTIONS = ['本人', '配偶', '孩子', '父亲', '母亲']
 const PAYMENT_PERIODS = ['1', '3', '5', '10', '15', '20', '30', 'lifetime']
 
 // 责任类型识别映射
@@ -82,10 +85,8 @@ function detectCoverageCategory(name: string): '重疾责任' | '中症责任' |
   return '特定疾病责任'
 }
 
-// 辅助函数：创建原文片段显示
+// 辅助函数：创建原文片段显示（直接显示完整内容）
 function ExtractedTextDisplay({ extractedText }: { extractedText?: string | string[] }) {
-  const [expanded, setExpanded] = useState(false)
-  
   // 如果extractedText为null/undefined，或者是空字符串/空数组，显示"未识别到"
   const texts = extractedText ? (Array.isArray(extractedText) ? extractedText : [extractedText]) : []
   const hasText = texts.some(t => t && t.trim() !== '')
@@ -108,87 +109,8 @@ function ExtractedTextDisplay({ extractedText }: { extractedText?: string | stri
     )
   }
   
-  // 合并所有文本
+  // 合并所有文本，直接显示完整内容
   const fullText = texts.join(' ')
-  
-  // 智能提取关键信息
-  const extractKeyInfo = (text: string): { summary: string; hasMore: boolean } => {
-    // 关键词列表（用于判断单次赔付、赔付次数等）
-    const keyWords = ['本合同终止', '合同终止', '一次给付', '一次性给付', '仅给付一次', '只给付一次', '最多', '累计', '不限次数', '多次赔付', '可重复赔付']
-    
-    // 等待期关键词（用于过滤）
-    const waitingPeriodKeywords = ['日内', '天内', '个月内', '等待期内', '观察期内']
-    
-    // 按标点符号分割成句子或短语
-    const parts = text.split(/[，。；、：]/)
-    
-    // 提取包含关键词的部分，但排除等待期相关的
-    const keyParts: string[] = []
-    
-    for (const part of parts) {
-      const trimmedPart = part.trim()
-      if (!trimmedPart) continue
-      
-      // 检查是否包含关键词
-      const hasKeyWord = keyWords.some(kw => trimmedPart.includes(kw))
-      
-      if (hasKeyWord) {
-        // 检查是否是等待期内的描述
-        const isWaitingPeriod = waitingPeriodKeywords.some(wp => {
-          const beforeKeyword = trimmedPart.split(wp)[0]
-          // 如果在"xx日内"之前提到了等待期、生效、复效，则认为是等待期描述
-          return trimmedPart.includes(wp) && /\d+/.test(beforeKeyword) && (beforeKeyword.includes('等待期') || beforeKeyword.includes('生效') || beforeKeyword.includes('复效'))
-        })
-        
-        // 如果不是等待期描述，或者明确提到"等待期后"，则保留
-        if (!isWaitingPeriod || trimmedPart.includes('等待期后') || trimmedPart.includes('日后')) {
-          keyParts.push(trimmedPart)
-        }
-      }
-    }
-    
-    // 如果有提取到的关键部分
-    if (keyParts.length > 0) {
-      // 去重并连接
-      const uniqueParts = Array.from(new Set(keyParts))
-      const summary = uniqueParts.join('；')
-      
-      // 如果提取出的内容还是太长，做二次简化
-      if (summary.length > 150) {
-        // 优先保留包含"终止"、"一次"等核心关键词的部分
-        const coreParts = uniqueParts.filter(p => 
-          p.includes('终止') || p.includes('一次') || /最多\s*\d+\s*次/.test(p)
-        )
-        
-        if (coreParts.length > 0) {
-          const coreSummary = coreParts.join('；')
-          return {
-            summary: coreSummary.length > 120 ? coreSummary.substring(0, 120) + '...' : coreSummary,
-            hasMore: true
-          }
-        }
-        
-        return {
-          summary: summary.substring(0, 120) + '...',
-          hasMore: true
-        }
-      }
-      
-      return {
-        summary,
-        hasMore: text.length > summary.length
-      }
-    }
-    
-    // 如果没有匹配到关键词，显示前80字符
-    return {
-      summary: text.length > 80 ? text.substring(0, 80) + '...' : text,
-      hasMore: text.length > 80
-    }
-  }
-  
-  const { summary, hasMore } = extractKeyInfo(fullText)
-  const displayText = expanded ? fullText : summary
   
   return (
     <div style={{
@@ -202,24 +124,7 @@ function ExtractedTextDisplay({ extractedText }: { extractedText?: string | stri
       lineHeight: '1.6'
     }}>
       <span style={{ fontWeight: '600', color: '#01BCD6' }}>📄 原文片段：</span>
-      <span style={{ wordBreak: 'break-word', marginLeft: '6px' }}>
-        {displayText}
-        {hasMore && (
-          <span
-            onClick={() => setExpanded(!expanded)}
-            style={{
-              marginLeft: '8px',
-              color: '#01BCD6',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: '600',
-              textDecoration: 'underline'
-            }}
-          >
-            {expanded ? '收起' : '查看完整'}
-          </span>
-        )}
-      </span>
+      <span style={{ wordBreak: 'break-word', marginLeft: '6px' }}>{fullText}</span>
     </div>
   )
 }
@@ -229,13 +134,42 @@ function OtherFieldDisplay({
   title, 
   data, 
   payoutCountData,
+  note,
   renderContent 
 }: { 
   title: string
   data: any
   payoutCountData?: any
+  note?: string
   renderContent: (data: any, payoutCountData?: any) => React.ReactNode
 }) {
+  // 从note中提取与当前字段相关的内容
+  const extractFromNote = (noteText: string | undefined, fieldTitle: string): string | undefined => {
+    if (!noteText) return undefined
+    
+    // 按分号分割note
+    const parts = noteText.split(/[；;]/)
+    
+    // 根据字段类型匹配关键词
+    const keywordMap: { [key: string]: string[] } = {
+      '是否分组': ['分组', '组别', '同组', '不同组'],
+      '是否可以重复赔付': ['重复', '再次', '多次', '限赔', '限给付', '累计', '最多赔'],
+      '间隔期': ['间隔', '相隔', '之后', '日后', '天后', '年后'],
+      '赔付次数': ['次为限', '限赔', '限给付', '最多赔', '累计'],
+      '疾病发生是否豁免保费': ['豁免', '免交']
+    }
+    
+    const keywords = keywordMap[fieldTitle] || []
+    const matchedParts = parts.filter(part => 
+      keywords.some(kw => part.includes(kw))
+    )
+    
+    if (matchedParts.length > 0) {
+      return matchedParts.join('；')
+    }
+    return undefined
+  }
+  
   // 计算置信度逻辑：
   // 1. 如果有confidence，使用该值
   // 2. 如果是从赔付次数=1推导出的默认值，置信度为"中"（0.6）
@@ -243,6 +177,10 @@ function OtherFieldDisplay({
   // 4. 完全默认值，置信度为"低"（0.2）
   const hasExtractedText = typeof data === 'object' && data?.extractedText
   const isSinglePayout = payoutCountData?.type === 'single'
+  
+  // 尝试从note中提取内容
+  const noteExtractedText = extractFromNote(note, title)
+  const hasNoteText = !!noteExtractedText
   
   let confidence = 0.2 // 默认低置信度
   if (typeof data === 'object' && data?.confidence) {
@@ -252,11 +190,17 @@ function OtherFieldDisplay({
     confidence = 0.6
   } else if (hasExtractedText) {
     confidence = 0.3
+  } else if (hasNoteText) {
+    confidence = 0.5  // 从note中提取的，置信度为中
   }
   
   const confidenceText = confidence >= 0.8 ? '高' : 
                         confidence >= 0.5 ? '中' : '低'
-  const extractedText = typeof data === 'object' ? data?.extractedText : undefined
+  
+  // 优先使用extractedText，其次使用从note提取的内容
+  // 确保空字符串也会 fallback 到 noteExtractedText
+  const dataExtractedText = typeof data === 'object' ? data?.extractedText : undefined
+  const extractedText = (dataExtractedText && dataExtractedText.trim() !== '') ? dataExtractedText : noteExtractedText
 
   // 统一的图标映射
   const iconMap: { [key: string]: string } = {
@@ -1052,11 +996,23 @@ export default function SmartInputPage() {
   const defaultBirthYear = 2000
   
   const [productIdNumber, setProductIdNumber] = useState('') // 保险产品ID号
+  const [policyIdOptions, setPolicyIdOptions] = useState<string[]>([]) // 保险产品ID下拉选项
+  const [existingPolicies, setExistingPolicies] = useState<any[]>([]) // 用户已录入的保单列表
   const [insuranceCompany, setInsuranceCompany] = useState('')
   const [policyType, setPolicyType] = useState('critical_illness')
   const [productName, setProductName] = useState('')
-  const [insuredPerson, setInsuredPerson] = useState('本人') // 默认"本人"
-  const [birthYear, setBirthYear] = useState(defaultBirthYear.toString()) // 默认2000年
+  
+  // 家庭成员相关
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([])
+  const [selectedMemberId, setSelectedMemberId] = useState<number | null>(null) // 选中的家庭成员ID
+  const [addMemberModalVisible, setAddMemberModalVisible] = useState(false)
+  const [memberForm] = Form.useForm()
+  
+  // 从选中的家庭成员获取 insuredPerson 和 birthYear
+  const selectedMember = familyMembers.find(m => m.id === selectedMemberId)
+  const insuredPerson = selectedMember?.entity || ''
+  const birthYear = selectedMember?.birthYear?.toString() || ''
+  
   const [policyStartYear, setPolicyStartYear] = useState(Math.min(currentYear, maxStartYear).toString()) // 默认当前年份，但不超过2026年
   const [coverageEndYear, setCoverageEndYear] = useState('lifetime') // 默认"终身"
   const [totalPaymentPeriod, setTotalPaymentPeriod] = useState('')
@@ -1075,6 +1031,76 @@ export default function SmartInputPage() {
   const [parseResult, setParseResult] = useState<any>(null)
   const [policyInfoChanged, setPolicyInfoChanged] = useState(false) // 跟踪基础信息是否已修改
   const [showCoverageInput, setShowCoverageInput] = useState(false) // 控制责任分析区域的显示
+
+  // 加载保险产品ID下拉选项
+  const loadPolicyIdOptions = async () => {
+    try {
+      console.log('🔄 开始加载保险产品ID号列表...')
+      const response = await getProducts({ page: 1, pageSize: 10000 })
+      if (response.data && response.data.length > 0) {
+        const ids = Array.from(new Set(
+          response.data
+            .map((item: any) => item.policyId || item.保险产品ID号)
+            .filter((id: string) => id && id.trim())
+        )) as string[]
+        setPolicyIdOptions(ids.sort())
+        console.log('✅ 加载保险产品ID号列表成功:', ids.length, '个')
+      }
+    } catch (error) {
+      console.error('❌ 加载保险产品ID号失败:', error)
+    }
+  }
+
+  // 加载家庭成员列表
+  const loadFamilyMembers = async () => {
+    try {
+      const members = await getFamilyMembers(1) // TODO: 从登录状态获取 userId
+      setFamilyMembers(members)
+      // 如果有成员且未选择，默认选择第一个
+      if (members.length > 0 && !selectedMemberId && !editId) {
+        setSelectedMemberId(members[0].id)
+      }
+    } catch (error) {
+      console.error('加载家庭成员失败:', error)
+    }
+  }
+
+  // 加载用户已录入的保单列表
+  const loadExistingPolicies = async () => {
+    try {
+      const policies = await getPolicies(1) // TODO: 从登录状态获取 userId
+      setExistingPolicies(policies)
+    } catch (error) {
+      console.error('加载已录入保单失败:', error)
+    }
+  }
+
+  // 新增家庭成员
+  const handleAddMember = async () => {
+    try {
+      const values = await memberForm.validateFields()
+      const newMember = await createFamilyMember({ userId: 1, ...values })
+      message.success('添加成功')
+      setAddMemberModalVisible(false)
+      memberForm.resetFields()
+      // 重新加载并选中新成员
+      await loadFamilyMembers()
+      setSelectedMemberId(newMember.id)
+    } catch (error: any) {
+      if (error.response?.data?.error) {
+        message.error(error.response.data.error)
+      } else if (!error.errorFields) {
+        message.error('添加失败')
+      }
+    }
+  }
+
+  // 页面加载时获取产品ID列表、家庭成员和已录入保单
+  useEffect(() => {
+    loadPolicyIdOptions()
+    loadFamilyMembers()
+    loadExistingPolicies()
+  }, [])
 
   // 如果是编辑模式，加载数据
   useEffect(() => {
@@ -1191,12 +1217,26 @@ export default function SmartInputPage() {
         setInsuranceCompany(policy.insuranceCompany || '')
         setPolicyType(policy.policyType || 'critical_illness')
         setProductName(policy.productName || '')
-        setInsuredPerson(policy.insuredPerson || '本人')
         
-        // 设置保单信息
-        const birthYear = policy.birthYear || policy.policyInfo?.birthYear
-        if (birthYear) {
-          setBirthYear(birthYear.toString())
+        // 根据保单的 insuredPerson 和 birthYear 找到对应的家庭成员
+        const policyBirthYear = policy.birthYear || policy.policyInfo?.birthYear
+        const policyInsuredPerson = policy.insuredPerson || '本人'
+        
+        // 先加载家庭成员列表，然后匹配
+        const members = await getFamilyMembers(1)
+        setFamilyMembers(members)
+        
+        const matchedMember = members.find(
+          m => m.entity === policyInsuredPerson && m.birthYear === policyBirthYear
+        )
+        if (matchedMember) {
+          setSelectedMemberId(matchedMember.id)
+        } else if (members.length > 0) {
+          // 如果没有匹配的成员，尝试仅按 entity 匹配
+          const entityMatch = members.find(m => m.entity === policyInsuredPerson)
+          if (entityMatch) {
+            setSelectedMemberId(entityMatch.id)
+          }
         }
         
         const policyStartYear = policy.policyStartYear || policy.policyInfo?.policyStartYear
@@ -1249,7 +1289,7 @@ export default function SmartInputPage() {
         
         // 重要：更新 prevPolicyInfoRef，避免将加载数据误判为"修改"
         // 使用从 policy 获取的实际值，而不是 state（因为 state 可能还没更新）
-        const loadedBirthYear = birthYear ? birthYear.toString() : ''
+        const loadedBirthYear = policyBirthYear ? policyBirthYear.toString() : ''
         const loadedPolicyStartYear = policyStartYear ? policyStartYear.toString() : ''
         const loadedCoverageEndYear = coverageEndYear === 'lifetime' ? 'lifetime' : (coverageEndYear ? coverageEndYear.toString() : '')
         const loadedPaymentPeriod = paymentPeriod ? (typeof paymentPeriod === 'string' ? paymentPeriod.match(/\d+/)?.[0] || '' : paymentPeriod.toString()) : ''
@@ -1625,6 +1665,10 @@ export default function SmartInputPage() {
           if (!parseResult.是否豁免 && c.是否豁免 !== undefined) {
             parseResult.是否豁免 = c.是否豁免
           }
+          // 复制 note 字段（用于原文片段显示）
+          if (!parseResult.note && c.note) {
+            parseResult.note = c.note
+          }
           
           return {
             id: `lib-${c.id}`,
@@ -1749,11 +1793,8 @@ export default function SmartInputPage() {
     if (!productName || productName.trim() === '') {
       missingFields.push('产品名称')
     }
-    if (!insuredPerson || insuredPerson.trim() === '') {
-      missingFields.push('被保险人')
-    }
-    if (!birthYear || birthYear.trim() === '') {
-      missingFields.push('出生年份')
+    if (!selectedMemberId) {
+      missingFields.push('被保险人（请选择家庭成员）')
     }
     if (!policyStartYear || policyStartYear.trim() === '') {
       missingFields.push('投保开始年份')
@@ -1799,7 +1840,9 @@ export default function SmartInputPage() {
       return
     }
 
-    try {
+    // 实际保存逻辑（提取成函数，便于覆盖时复用）
+    const doSavePolicy = async (overrideId?: number) => {
+      try {
       // 🔄 如果基础信息已修改，重新计算所有责任的 keyAmounts
       let finalCoverages = coverages
       
@@ -1814,10 +1857,11 @@ export default function SmartInputPage() {
         }
         
       // 如果有编辑的保单，检查保障结束年份是否改变
+        const targetId = overrideId || (editId ? parseInt(editId) : null)
       let coverageEndYearChanged = false
-      if (editId) {
+        if (targetId) {
         try {
-          const existingPolicy = await getPolicyById(parseInt(editId))
+            const existingPolicy = await getPolicyById(targetId)
           if (existingPolicy) {
             const oldCoverageEndYear = existingPolicy.policyInfo?.coverageEndYear ?? existingPolicy.coverageEndYear ?? 'lifetime'
             const newCoverageEndYear = currentPolicyInfo.coverageEndYear
@@ -1867,23 +1911,42 @@ export default function SmartInputPage() {
         return
       }
       
+        // 尝试从责任中提取保单ID号（如果用户没有输入）
+        let finalPolicyIdNumber = productIdNumber
+        if (!finalPolicyIdNumber && selectedCoverages.length > 0) {
+          const firstCoverage = selectedCoverages[0]
+          finalPolicyIdNumber = firstCoverage?.parseResult?.保单ID号 || 
+                                firstCoverage?.parseResult?.['保单ID号'] || ''
+          if (finalPolicyIdNumber) {
+            console.log('[保存] 从责任中提取保单ID号:', finalPolicyIdNumber)
+          }
+        }
+        
+        // 使用已选择的家庭成员ID
       const policyData = {
         userId: 1, // TODO: 从登录状态获取
+          insuredPersonId: selectedMemberId, // 关联被保险人
         insuranceCompany,
         policyType,
         productName,
         insuredPerson,
-        birthYear: parseInt(birthYear),
+          birthYear: selectedMember?.birthYear || parseInt(birthYear),
         policyStartYear: parseInt(policyStartYear),
         coverageEndYear: coverageEndYear === 'lifetime' ? 'lifetime' : parseInt(coverageEndYear),
         totalPaymentPeriod: totalPaymentPeriod === 'lifetime' ? 'lifetime' : parseInt(totalPaymentPeriod),
         annualPremium: parseFloat(annualPremium),
         basicSumInsured: parseFloat(basicSumInsured) * 10000,
-        productIdNumber: productIdNumber || undefined, // 保存产品ID号
+          policyIdNumber: finalPolicyIdNumber || undefined, // 保单ID号（如：百年人寿[2020]疾病保险009号）
         coverages: selectedCoverages
       }
 
-      if (editId) {
+        console.log('[保存] policyIdNumber:', finalPolicyIdNumber)
+
+        if (overrideId) {
+          // 覆盖模式：更新已有保单
+          await editPolicy(overrideId, policyData as any)
+          message.success('已覆盖原有保单！')
+        } else if (editId) {
         await editPolicy(parseInt(editId), policyData as any)
         message.success('更新成功！')
       } else {
@@ -1891,10 +1954,46 @@ export default function SmartInputPage() {
         message.success('保存成功！')
       }
       
-      navigate('/')
+        navigate('/my-policies')
     } catch (error: any) {
       message.error(error.message || '保存失败')
     }
+    }
+    
+    // 检查保单ID + 被保险人 是否重复（同一产品同一被保人不能重复录入）
+    if (productIdNumber && productIdNumber.trim()) {
+      const duplicatePolicy = existingPolicies.find(p => 
+        p.policyIdNumber === productIdNumber && 
+        p.insuredPerson === insuredPerson &&
+        (!editId || parseInt(editId) !== parseInt(p.id))
+      )
+      if (duplicatePolicy) {
+        // 弹出确认框，询问是否覆盖
+        Modal.confirm({
+          title: '保单已存在',
+          content: (
+            <div>
+              <p>该被保险人 <strong>{insuredPerson}</strong> 已有此保单：</p>
+              <p style={{ color: '#666', marginTop: '8px' }}>
+                产品名称：{duplicatePolicy.productName}<br/>
+                保单ID：{productIdNumber}
+              </p>
+              <p style={{ marginTop: '12px', color: '#ff6b00' }}>是否覆盖原有保单？</p>
+            </div>
+          ),
+          okText: '确认覆盖',
+          cancelText: '取消',
+          okButtonProps: { danger: true },
+          onOk: async () => {
+            await doSavePolicy(duplicatePolicy.id)
+          }
+        })
+        return
+      }
+    }
+
+    // 正常保存
+    await doSavePolicy()
   }
 
   // 删除责任
@@ -1971,19 +2070,14 @@ export default function SmartInputPage() {
                   保险产品ID号 <span style={{ fontSize: '12px', color: '#999', fontWeight: 'normal' }}>💡 输入产品编码可自动填充保险公司、产品名称及责任清单</span>
                 </label>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    className="html-input"
-                    placeholder="如：百年人寿[2020]疾病保险013号"
-                    value={productIdNumber}
-                    onChange={(e) => setProductIdNumber(e.target.value)}
-                    onKeyPress={(e) => {
-                      if (e.key === 'Enter') {
-                        handleProductSearch()
-                      }
-                    }}
-                    style={{ flex: 1 }}
-                  />
+                  <div style={{ flex: 1 }}>
+                    <ProductIdSelector
+                      value={productIdNumber}
+                      onChange={setProductIdNumber}
+                      placeholder="如：百年人寿[2020]疾病保险013号"
+                      options={policyIdOptions}
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={handleProductSearch}
@@ -2055,40 +2149,109 @@ export default function SmartInputPage() {
                 </div>
               </div>
 
-              {/* 被保险人和出生年份 */}
+              {/* 被保险人和基本保额同行 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
+                {/* 被保险人（选择家庭成员） */}
                 <div>
                   <label className="html-label">
                     被保险人 <span className="required">*</span>
                   </label>
                   <select
                     className="html-select"
-                    value={insuredPerson}
-                    onChange={(e) => setInsuredPerson(e.target.value)}
+                    value={selectedMemberId || ''}
+                    onChange={(e) => setSelectedMemberId(e.target.value ? parseInt(e.target.value) : null)}
+                    style={{ ...getFieldHighlightStyle(selectedMemberId?.toString() || '') }}
                   >
-                    <option value="">请选择被保险人</option>
-                    {INSURED_PERSONS.map(person => (
-                      <option key={person} value={person}>{person}</option>
-                    ))}
+                    <option value="">请选择家庭成员</option>
+                    {(() => {
+                      // 按固定顺序排序：本人、配偶、老大、老二...
+                      const orderMap: Record<string, number> = { '本人': 0, '配偶': 1, '老大': 2, '老二': 3, '老三': 4, '老四': 5, '老五': 6 }
+                      const sortedMembers = [...familyMembers].sort((a, b) => {
+                        const orderA = orderMap[a.entity] ?? 99
+                        const orderB = orderMap[b.entity] ?? 99
+                        return orderA - orderB
+                      })
+                      
+                      return sortedMembers.map(member => (
+                        <option key={member.id} value={member.id}>
+                          {member.entity}
+                        </option>
+                      ))
+                    })()}
                   </select>
                 </div>
+                {/* 基本保额 */}
                 <div>
                   <label className="html-label">
-                    出生年份 <span className="required">*</span>
+                    基本保额 <span className="required">*</span>
                   </label>
-                  <select
-                    className="html-select"
-                    value={birthYear}
-                    onChange={(e) => setBirthYear(e.target.value)}
-                    style={getFieldHighlightStyle(birthYear)}
-                  >
-                    <option value="">请选择出生年份</option>
-                    {birthYears.reverse().map(year => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
-                  </select>
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      className="html-input"
+                      placeholder="请输入基本保额"
+                      value={basicSumInsured}
+                      onChange={(e) => setBasicSumInsured(e.target.value)}
+                      style={{ paddingRight: '40px', ...getFieldHighlightStyle(basicSumInsured) }}
+                    />
+                    <span style={{
+                      position: 'absolute',
+                      right: '12px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: '#666',
+                      fontSize: '14px'
+                    }}>万元</span>
+                  </div>
                 </div>
               </div>
+
+              {/* 新增家庭成员弹窗 */}
+              <Modal
+                title="新增家庭成员"
+                open={addMemberModalVisible}
+                onOk={handleAddMember}
+                onCancel={() => setAddMemberModalVisible(false)}
+                okText="保存"
+                cancelText="取消"
+                width={400}
+              >
+                <Form form={memberForm} layout="vertical" style={{ marginTop: '16px' }}>
+                  <Form.Item
+                    name="entity"
+                    label="称谓"
+                    rules={[{ required: true, message: '请选择称谓' }]}
+                  >
+                    <Select placeholder="请选择称谓">
+                      {ENTITY_OPTIONS.map(opt => (
+                        <Select.Option key={opt} value={opt}>{opt}</Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                  <Form.Item
+                    name="birthYear"
+                    label="出生年份"
+                    rules={[{ required: true, message: '请输入出生年份' }]}
+                  >
+                    <InputNumber
+                      min={1900}
+                      max={new Date().getFullYear()}
+                      style={{ width: '100%' }}
+                      placeholder="请输入出生年份"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    name="gender"
+                    label="性别"
+                    rules={[{ required: true, message: '请选择性别' }]}
+                  >
+                    <Select placeholder="请选择性别">
+                      <Select.Option value="男">男</Select.Option>
+                      <Select.Option value="女">女</Select.Option>
+                    </Select>
+                  </Form.Item>
+                </Form>
+              </Modal>
 
               {/* 投保开始年份和保障结束年份 */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '8px' }}>
@@ -2173,41 +2336,11 @@ export default function SmartInputPage() {
                     }}>元</span>
                   </div>
                 </div>
-              </div>
-
-              {/* 基本保额 */}
-              <div style={{ marginBottom: '8px' }}>
-                <label className="html-label">
-                  基本保额 <span className="required">*</span>
-                </label>
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: hasLibraryCoverages ? '1fr 200px' : '1fr', 
-                  gap: '12px',
-                  alignItems: 'end'
-                }}>
-                  {/* 基本保额输入框 */}
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type="number"
-                      className="html-input"
-                      placeholder="请输入基本保额"
-                      value={basicSumInsured}
-                      onChange={(e) => setBasicSumInsured(e.target.value)}
-                      style={{ paddingRight: '40px', ...getFieldHighlightStyle(basicSumInsured) }}
-                    />
-                    <span style={{
-                      position: 'absolute',
-                      right: '12px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: '#666',
-                      fontSize: '14px'
-                    }}>万元</span>
                   </div>
                   
                   {/* 计算理赔金额按钮 - 仅在有库责任时显示 */}
                   {hasLibraryCoverages && (
+                <div style={{ marginBottom: '8px' }}>
                     <button
                       onClick={handleManualCalculate}
                       style={{
@@ -2235,9 +2368,8 @@ export default function SmartInputPage() {
                     >
                       {hasCalculatedAmounts ? '🔄 重新计算' : '💫 计算理赔金额'}
                     </button>
-                  )}
                 </div>
-              </div>
+              )}
               
               {/* 提示信息 - 仅在有库责任时显示 */}
               {hasLibraryCoverages && (
@@ -2566,62 +2698,6 @@ export default function SmartInputPage() {
                 >
                   {showCoverageInput ? '收起责任分析' : '+ 新增责任'}
                 </button>
-              </div>
-            )}
-
-            {/* 编辑模式提示 */}
-            {editingIndex !== null && (
-              <div style={{ 
-                marginBottom: '24px',
-                padding: '16px',
-                background: '#e6f7ff',
-                border: '2px solid #01BCD6',
-                borderRadius: '8px'
-              }}>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  marginBottom: '12px'
-                }}>
-                  <span style={{ fontSize: '15px', fontWeight: '600', color: '#01BCD6' }}>
-                    ✏️ 正在编辑：{coverageName}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setEditingIndex(null)
-                      setParseResult(null)
-                      setCoverageName('')
-                      setClauseText('')
-                      message.info('已取消编辑')
-                    }}
-                    style={{
-                      padding: '4px 12px',
-                      fontSize: '13px',
-                      background: '#FF7A5C',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    取消编辑
-                  </button>
-                </div>
-                {/* 责任名称编辑 */}
-                <div>
-                  <label className="html-label" style={{ marginBottom: '6px', display: 'block' }}>
-                    责任名称
-                  </label>
-                  <input
-                    type="text"
-                    className="html-input"
-                    value={coverageName}
-                    onChange={(e) => setCoverageName(e.target.value)}
-                    placeholder="输入责任名称"
-                    style={{ width: '100%' }}
-                  />
-                </div>
               </div>
             )}
 
@@ -3315,7 +3391,21 @@ export default function SmartInputPage() {
                 {(parseResult.payoutCount || parseResult.赔付次数) && (
                   <OtherFieldDisplay
                     title="赔付次数"
-                    data={parseResult.payoutCount || { extractedText: parseResult.赔付次数 }}
+                    data={(() => {
+                      // 从note中提取与"赔付次数"相关的原文
+                      const noteText = parseResult.note || ''
+                      const noteParts = noteText.split(/[；;]/)
+                      const countKeywords = ['次为限', '限赔', '限给付', '最多赔', '累计']
+                      const extractedFromNote = noteParts.filter((part: string) => 
+                        countKeywords.some(kw => part.includes(kw))
+                      ).join('；')
+                      
+                      if (parseResult.payoutCount) {
+                        return { ...parseResult.payoutCount, extractedText: extractedFromNote || parseResult.payoutCount.extractedText }
+                      }
+                      return { extractedText: extractedFromNote || parseResult.赔付次数 }
+                    })()}
+                    note={parseResult.note}
                     renderContent={(data) => {
                       // 兼容两种格式：
                       // 1. payoutCount对象格式：{ type: 'single', maxCount: 1 }
@@ -3378,8 +3468,23 @@ export default function SmartInputPage() {
                 {/* 其他字段 - 是否分组（兼容责任库格式） */}
                 <OtherFieldDisplay
                   title="是否分组"
-                  data={parseResult.grouping || (parseResult.是否分组 !== undefined ? { isGrouped: parseResult.是否分组 } : null)}
+                  data={(() => {
+                    // 从note中提取与"是否分组"相关的原文
+                    const noteText = parseResult.note || ''
+                    const noteParts = noteText.split(/[；;]/)
+                    const groupKeywords = ['分组', '组别', '同组', '不同组']
+                    const extractedFromNote = noteParts.filter((part: string) => 
+                      groupKeywords.some(kw => part.includes(kw))
+                    ).join('；')
+                    
+                    if (parseResult.grouping) {
+                      return { ...parseResult.grouping, extractedText: parseResult.grouping.extractedText || extractedFromNote }
+                    }
+                    // 即使 是否分组 是 undefined，也返回带有 extractedText 的对象
+                    return { isGrouped: parseResult.是否分组, extractedText: extractedFromNote || '' }
+                  })()}
                   payoutCountData={parseResult.payoutCount || (parseResult.赔付次数 === '1次' ? { type: 'single' } : null)}
+                  note={parseResult.note}
                     renderContent={(data, payoutCountData) => {
                       const isSinglePayout = payoutCountData?.type === 'single' || parseResult.赔付次数 === '1次'
                       let defaultValue = 'not_grouped'
@@ -3450,11 +3555,32 @@ export default function SmartInputPage() {
                 {/* 其他字段 - 是否可以重复赔付（兼容责任库格式） */}
                 <OtherFieldDisplay
                     title="是否可以重复赔付"
-                    data={parseResult.repeatablePayout || (parseResult.是否可以重复赔付 !== undefined ? { isRepeatable: parseResult.是否可以重复赔付 } : null)}
+                    data={(() => {
+                      // 从note中提取与"是否可以重复赔付"相关的原文
+                      const noteText = parseResult.note || ''
+                      const noteParts = noteText.split(/[；;]/)
+                      const repeatKeywords = ['重复', '再次', '多次', '限赔', '限给付', '累计', '最多赔']
+                      const extractedFromNote = noteParts.filter((part: string) => 
+                        repeatKeywords.some(kw => part.includes(kw))
+                      ).join('；')
+                      
+                      if (parseResult.repeatablePayout) {
+                        return { ...parseResult.repeatablePayout, extractedText: parseResult.repeatablePayout.extractedText || extractedFromNote }
+                      }
+                      // 即使 是否可以重复赔付 是 undefined，也返回带有 extractedText 的对象
+                      return { isRepeatable: parseResult.是否可以重复赔付, extractedText: extractedFromNote || '' }
+                    })()}
                     payoutCountData={parseResult.payoutCount || (parseResult.赔付次数 === '1次' ? { type: 'single' } : null)}
+                    note={parseResult.note}
                     renderContent={(data, payoutCountData) => {
                       const isSinglePayout = payoutCountData?.type === 'single' || parseResult.赔付次数 === '1次'
-                      let defaultValue = 'repeatable'
+                      
+                      // 从note中智能判断是否可以重复赔付
+                      const noteText = parseResult.note || ''
+                      // 如果note中包含"每种...限赔1次"或"每种...限给付一次"等，说明不可以重复赔付
+                      const hasNotRepeatableKeyword = /每种.{0,5}限赔1次|每种.{0,5}限给付一次|每种.{0,5}仅给付一次|每种.{0,5}只给付一次|给付以1次为限|给付以一次为限/.test(noteText)
+                      
+                      let defaultValue = hasNotRepeatableKeyword ? 'not_repeatable' : 'repeatable'
                       if (isSinglePayout) {
                         defaultValue = 'not_applicable'
                       } else if (typeof data === 'object' && data?.isRepeatable !== undefined) {
@@ -3524,8 +3650,25 @@ export default function SmartInputPage() {
                 {/* 其他字段 - 间隔期（兼容责任库格式） */}
                 <OtherFieldDisplay
                   title="间隔期"
-                  data={parseResult.intervalPeriod || (parseResult.间隔期 ? { hasInterval: true, days: parseInt(parseResult.间隔期.match(/\d+/)?.[0] || '0'), extractedText: parseResult.间隔期 } : null)}
+                  data={(() => {
+                    // 从note中提取与"间隔期"相关的原文
+                    const noteText = parseResult.note || ''
+                    const noteParts = noteText.split(/[；;]/)
+                    const intervalKeywords = ['间隔', '相隔', '之后', '日后', '天后', '年后']
+                    const extractedFromNote = noteParts.filter((part: string) => 
+                      intervalKeywords.some(kw => part.includes(kw))
+                    ).join('；')
+                    
+                    if (parseResult.intervalPeriod) {
+                      return { ...parseResult.intervalPeriod, extractedText: extractedFromNote || parseResult.intervalPeriod.extractedText }
+                    }
+                    if (parseResult.间隔期) {
+                      return { hasInterval: true, days: parseInt(parseResult.间隔期.match(/\d+/)?.[0] || '0'), extractedText: extractedFromNote || parseResult.间隔期 }
+                    }
+                    return null
+                  })()}
                   payoutCountData={parseResult.payoutCount || (parseResult.赔付次数 === '1次' ? { type: 'single' } : null)}
+                  note={parseResult.note}
                     renderContent={(data, payoutCountData) => {
                       const isSinglePayout = payoutCountData?.type === 'single' || parseResult.赔付次数 === '1次'
                       let value = '0'

@@ -17,6 +17,7 @@ model User {
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
   insurancePoliciesParsed InsurancePolicyParsed[]
+  insuredPersons          InsuredPerson[]
 
   @@map("users")
 }
@@ -77,11 +78,39 @@ model InsuranceProduct {
   @@map("insurance_product_library")
 }
 
+// 被保险人信息表（统一管理）
+model InsuredPerson {
+  id               Int      @id @default(autoincrement())
+  userId           Int      // 所属用户
+  entity           String   // 被保险人身份：本人/配偶/孩子
+  birthYear        Int      // 出生年份
+  name             String?  // 姓名（可选）
+  gender           String?  // 性别（可选）
+  
+  // 关联的保单
+  policies         InsurancePolicyParsed[]
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 唯一约束：同一用户下，同一身份唯一（本人只能有一个，配偶只能有一个）
+  @@unique([userId, entity])
+  @@index([userId])
+  @@map("insured_persons")
+}
+
 // 客户保单（解析后的保单）
 model InsurancePolicyParsed {
   id               Int      @id @default(autoincrement())
   userId           Int
+  
+  // 关联被保险人
+  insuredPersonId  Int?
+  insuredPerson_   InsuredPerson? @relation(fields: [insuredPersonId], references: [id], onDelete: SetNull)
+  
   policyNumber     String?
+  policyIdNumber   String?  // 保单ID号（如：百年人寿[2020]疾病保险009号），用于唯一标识
   insuranceCompany String
   productName      String
   policyType       String // 重疾险/人寿险/意外险/年金险
@@ -104,11 +133,14 @@ model InsurancePolicyParsed {
   updatedAt        DateTime @updatedAt
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, policyIdNumber, entity]) // 同一用户+同一保单ID+同一被保险人 不能重复
   @@index([userId])
   @@index([userId, entity])
   @@index([userId, policyType])
   @@index([userId, entity, policyType])
   @@index([policyNumber])
+  @@index([policyIdNumber])
+  @@index([insuredPersonId])
   @@map("insurance_policies_parsed")
 }
 

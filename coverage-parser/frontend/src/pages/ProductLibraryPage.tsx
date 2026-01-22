@@ -12,7 +12,8 @@ import {
   Col,
   Modal,
   Upload,
-  Tooltip
+  Tooltip,
+  AutoComplete
 } from 'antd'
 import {
   SearchOutlined,
@@ -106,6 +107,40 @@ export default function ProductLibraryPage() {
       年金险: 0
     }
   })
+  
+  // 保险产品ID号列表（用于下拉选择）
+  const [policyIdOptions, setPolicyIdOptions] = useState<string[]>([])
+
+  // 加载所有保险产品ID号
+  const loadPolicyIds = async () => {
+    try {
+      console.log('🔄 开始加载保险产品ID号列表...')
+      // 获取所有产品（不分页，只取ID号）
+      const response = await getProducts({
+        page: 1,
+        pageSize: 10000 // 获取所有
+      })
+      
+      console.log('📡 获取产品响应:', response)
+      
+      if (response.success && response.data) {
+        // 提取所有不重复的ID号
+        const ids = Array.from(new Set(
+          response.data
+            .map((item: any) => item.policyId || item.保险产品ID号)
+            .filter((id: string) => id && id.trim())
+        )) as string[]
+        
+        setPolicyIdOptions(ids.sort())
+        console.log('✅ 加载保险产品ID号列表成功:', ids.length, '个')
+        console.log('📋 前5个ID示例:', ids.slice(0, 5))
+      } else {
+        console.warn('⚠️ 响应数据格式异常:', response)
+      }
+    } catch (error) {
+      console.error('❌ 加载保险产品ID号失败:', error)
+    }
+  }
 
   // 加载数据
   const loadData = async () => {
@@ -162,9 +197,15 @@ export default function ProductLibraryPage() {
     }
   }
 
+  // 首次加载保险产品ID号列表（只运行一次）
+  useEffect(() => {
+    console.log('🚀 ProductLibraryPage 首次挂载，加载ID列表')
+    loadPolicyIds()
+  }, [])
+
   // 初始化加载
   useEffect(() => {
-    console.log('🚀 ProductLibraryPage 初始化')
+    console.log('🔄 页码变化，重新加载数据')
     loadData()
   }, [pagination.current, pagination.pageSize])
 
@@ -194,12 +235,23 @@ export default function ProductLibraryPage() {
       ellipsis: true,
       filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
         <div style={{ padding: 8 }}>
-          <Input
-            placeholder="搜索产品ID号"
+          <Select
+            showSearch
+            placeholder="搜索或选择产品ID号"
             value={selectedKeys[0]}
-            onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
-            onPressEnter={() => confirm()}
-            style={{ width: 188, marginBottom: 8, display: 'block' }}
+            onChange={(value) => {
+              setSelectedKeys(value ? [value] : [])
+            }}
+            onSelect={() => {
+              setTimeout(() => confirm(), 100)
+            }}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            allowClear
+            style={{ width: 280, marginBottom: 8, display: 'block' }}
+            options={policyIdOptions.map(id => ({ value: id, label: id }))}
+            dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
           />
           <Space>
             <Button
@@ -207,7 +259,7 @@ export default function ProductLibraryPage() {
               onClick={() => confirm()}
               icon={<SearchOutlined />}
               size="small"
-              style={{ width: 90 }}
+              style={{ width: 130 }}
             >
               搜索
             </Button>
@@ -217,7 +269,7 @@ export default function ProductLibraryPage() {
                 confirm()
               }}
               size="small"
-              style={{ width: 90 }}
+              style={{ width: 130 }}
             >
               重置
             </Button>

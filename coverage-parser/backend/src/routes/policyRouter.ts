@@ -81,6 +81,7 @@ router.get('/', async (req, res) => {
       totalPaymentPeriod: policy.paymentPeriod ? `${policy.paymentPeriod}年` : undefined,
       annualPremium: policy.annualPremium,
       basicSumInsured: policy.basicSumInsured,
+      policyIdNumber: policy.policyIdNumber,
       coverages: policy.coverages || [],
       createdAt: policy.createdAt,
       updatedAt: policy.updatedAt,
@@ -134,6 +135,7 @@ router.get('/:id', async (req, res) => {
       totalPaymentPeriod: policy.paymentPeriod ? `${policy.paymentPeriod}年` : undefined,
       annualPremium: policy.annualPremium,
       basicSumInsured: policy.basicSumInsured,
+      policyIdNumber: policy.policyIdNumber,
       coverages: policy.coverages || [],
       createdAt: policy.createdAt,
       updatedAt: policy.updatedAt,
@@ -170,6 +172,7 @@ router.post('/', async (req, res) => {
     const policyData: any = {
       userId: rawData.userId || 1, // 默认 userId 为 1
       policyNumber: rawData.policyNumber,
+      policyIdNumber: rawData.policyIdNumber, // 保单ID号（如：百年人寿[2020]疾病保险009号）
       insuranceCompany: rawData.insuranceCompany,
       productName: rawData.productName,
       policyType: rawData.policyType,
@@ -266,6 +269,7 @@ router.post('/', async (req, res) => {
       totalPaymentPeriod: policy.paymentPeriod ? `${policy.paymentPeriod}年` : undefined,
       annualPremium: policy.annualPremium,
       basicSumInsured: policy.basicSumInsured,
+      policyIdNumber: policy.policyIdNumber,
       coverages: policy.coverages || [],
       createdAt: policy.createdAt,
       updatedAt: policy.updatedAt,
@@ -303,6 +307,7 @@ router.put('/:id', async (req, res) => {
     const updateData: any = {};
     
     if (rawData.policyNumber !== undefined) updateData.policyNumber = rawData.policyNumber;
+    if (rawData.policyIdNumber !== undefined) updateData.policyIdNumber = rawData.policyIdNumber;
     if (rawData.insuranceCompany !== undefined) updateData.insuranceCompany = rawData.insuranceCompany;
     if (rawData.productName !== undefined) updateData.productName = rawData.productName;
     if (rawData.policyType !== undefined) updateData.policyType = rawData.policyType;
@@ -362,6 +367,7 @@ router.put('/:id', async (req, res) => {
       totalPaymentPeriod: policy.paymentPeriod ? `${policy.paymentPeriod}年` : undefined,
       annualPremium: policy.annualPremium,
       basicSumInsured: policy.basicSumInsured,
+      policyIdNumber: policy.policyIdNumber,
       coverages: policy.coverages || [],
       createdAt: policy.createdAt,
       updatedAt: policy.updatedAt,

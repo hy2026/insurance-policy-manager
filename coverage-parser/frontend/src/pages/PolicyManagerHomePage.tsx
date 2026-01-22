@@ -1,19 +1,70 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, message } from 'antd'
-import { getPolicies, removePolicy } from '@/services/api'
+import { Modal, message, Select } from 'antd'
+import { getPolicies, removePolicy, getFamilyMembers, createFamilyMember, updateFamilyMember, deleteFamilyMember } from '@/services/api'
 import type { Policy } from '@/types'
+import type { FamilyMember } from '@/services/api'
 
-console.log('💎💎💎 版本 7.0 - 印章优化（上移+字小+强化毛玻璃+多重阴影）💎💎💎')
+console.log('💎💎💎 版本 12.0 - 内嵌家庭登记表单 💎💎💎')
 
-// 家庭成员图标配置
-const FAMILY_MEMBERS = [
-  { key: 'all', label: '家庭', icon: '/images/family.png', isImage: true, alwaysShow: true },
-  { key: '本人', label: '本人', icon: '/images/self.png', isImage: true, alwaysShow: true },
-  { key: '配偶', label: '配偶', icon: '/images/spouse.png', isImage: true, alwaysShow: false },
-  { key: '子女1', label: '子女1', icon: '👶', isImage: false, alwaysShow: false },
-  { key: '子女2', label: '子女2', icon: '👶', isImage: false, alwaysShow: false },
+// 根据性别动态生成婚育状态选项（参照zhichu1）
+const getMaritalStatusOptions = (gender: string) => [
+  {
+    value: 'single-no-child',
+    label: '单身 + 不养娃',
+    image: gender === '男' ? '/images/self-male.png' : '/images/self-female.png'
+  },
+  {
+    value: 'single-with-child',
+    label: '单身 + 养娃',
+    image: gender === '男' ? '/images/single-male-child.png' : '/images/single-female-child.png'
+  },
+  {
+    value: 'married-no-child',
+    label: '已婚 + 不养娃',
+    image: '/images/family-married.png'
+  },
+  {
+    value: 'married-with-child',
+    label: '已婚 + 养娃',
+    image: '/images/family-married-child.png'
+  }
 ]
+
+// 根据家庭成员组成获取当前状态
+// 判断是否是孩子类型的entity
+const isChildEntity = (entity: string): boolean => {
+  return ['孩子', '老大', '老二', '老三', '老四', '老五'].includes(entity) || entity.startsWith('孩子')
+}
+
+const getFamilyStatus = (members: FamilyMember[]): string => {
+  const hasSpouse = members.some(m => m.entity === '配偶')
+  const hasChild = members.some(m => isChildEntity(m.entity))
+  
+  if (hasSpouse && hasChild) return '已婚 + 养娃'
+  if (hasSpouse && !hasChild) return '已婚 + 不养娃'
+  if (!hasSpouse && hasChild) return '单身 + 养娃'
+  return '单身 + 不养娃'
+}
+
+// 根据家庭成员组成获取家庭图片
+const getFamilyImage = (members: FamilyMember[], selfGender: string | null): string => {
+  const hasSpouse = members.some(m => m.entity === '配偶')
+  const hasChild = members.some(m => isChildEntity(m.entity))
+  const gender = selfGender || '男'
+  
+  if (hasSpouse && hasChild) return '/images/family-married-child.png'
+  if (hasSpouse && !hasChild) return '/images/family-married.png'
+  if (!hasSpouse && hasChild) return gender === '男' ? '/images/single-male-child.png' : '/images/single-female-child.png'
+  return gender === '男' ? '/images/self-male.png' : '/images/self-female.png'
+}
+
+// 根据性别和称谓获取头像
+const getAvatarByGenderAndEntity = (gender: string | null, entity: string): string => {
+  if (isChildEntity(entity)) return '/images/child.png'
+  if (entity === '配偶') return gender === '男' ? '/images/self-male.png' : '/images/spouse.png'
+  return gender === '男' ? '/images/self-male.png' : '/images/self-female.png'
+}
 
 const POLICY_TYPE_MAP: Record<string, string> = {
   'critical_illness': '重疾险',
@@ -24,57 +75,313 @@ const POLICY_TYPE_MAP: Record<string, string> = {
 
 export default function PolicyManagerHomePage() {
   const navigate = useNavigate()
+  const currentYear = new Date().getFullYear()
+  
+  // 数据状态
   const [policies, setPolicies] = useState<Policy[]>([])
-  const [filteredMember, setFilteredMember] = useState<string | null>(null) // null表示选中"家庭"
+  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([])
+  const [filteredMemberId, setFilteredMemberId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  
+  // 家庭登记表单状态
+  const [showFamilyForm, setShowFamilyForm] = useState(false)
+  const [birthYear, setBirthYear] = useState<string>('2000')
+  const [gender, setGender] = useState<string>('女')
+  const [maritalStatus, setMaritalStatus] = useState<string>('')
+  const [partnerBirthYear, setPartnerBirthYear] = useState<string>('')
+  const [children, setChildren] = useState<{ id: string; birthYear: string }[]>([])
+  const [saving, setSaving] = useState(false)
+
+  // 年份选项
+  const years = Array.from({ length: 70 }, (_, i) => currentYear - 18 - i)
+  const childYears = Array.from({ length: 30 }, (_, i) => currentYear - i)
+
+  // 计算需要显示的字段
+  const needPartnerInfo = maritalStatus === 'married-no-child' || maritalStatus === 'married-with-child'
+  const needChildInfo = maritalStatus === 'single-with-child' || maritalStatus === 'married-with-child'
 
   useEffect(() => {
-    loadPolicies()
+    loadData()
   }, [])
 
-  const loadPolicies = async () => {
+  const loadData = async () => {
     try {
       setLoading(true)
-      const data = await getPolicies(1) // TODO: userId
-      setPolicies(data)
+      const [policiesData, membersData] = await Promise.all([
+        getPolicies(1),
+        getFamilyMembers(1)
+      ])
+      setPolicies(policiesData)
+      setFamilyMembers(membersData)
+      
+      // 如果没有家庭成员，首次进入时展开登记表单
+      if (membersData.length === 0) {
+        setShowFamilyForm(true)
+      } else {
+        // 从现有成员中提取数据到表单
+        initFormFromMembers(membersData)
+      }
     } catch (error) {
-      console.error('加载保单失败:', error)
-      message.error('加载保单失败')
+      console.error('加载数据失败:', error)
+      message.error('加载数据失败')
     } finally {
       setLoading(false)
     }
   }
 
-  // 计算成员统计
-  const getMemberStats = () => {
-    const stats: Record<string, number> = {}
-    let total = 0
+  // 从现有成员初始化表单数据
+  const initFormFromMembers = (members: FamilyMember[]) => {
+    const selfMember = members.find(m => m.entity === '本人')
+    const spouseMember = members.find(m => m.entity === '配偶')
+    const childMembers = members.filter(m => isChildEntity(m.entity))
     
-    policies.forEach(policy => {
-      total++
-      const member = policy.insuredPerson || '未指定'
-      stats[member] = (stats[member] || 0) + 1
-    })
+    if (selfMember) {
+      setBirthYear(selfMember.birthYear.toString())
+      setGender(selfMember.gender || '女')
+    }
     
-    return { stats, total }
+    if (spouseMember) {
+      setPartnerBirthYear(spouseMember.birthYear.toString())
+    }
+    
+    if (childMembers.length > 0) {
+      setChildren(childMembers.map(c => ({
+        id: c.id.toString(),
+        birthYear: c.birthYear.toString()
+      })))
+    }
+    
+    // 推断婚育状态
+    if (spouseMember && childMembers.length > 0) {
+      setMaritalStatus('married-with-child')
+    } else if (spouseMember) {
+      setMaritalStatus('married-no-child')
+    } else if (childMembers.length > 0) {
+      setMaritalStatus('single-with-child')
+    } else if (selfMember) {
+      setMaritalStatus('single-no-child')
+    }
   }
 
-  // 获取显示的成员列表
-  const getDisplayMembers = () => {
-    const { stats } = getMemberStats()
-    return FAMILY_MEMBERS.filter(member => 
-      member.alwaysShow || stats[member.key]
-    )
+  // 当婚育状态变化时的处理
+  useEffect(() => {
+    if (!needPartnerInfo) {
+      setPartnerBirthYear('')
+    } else if (!partnerBirthYear && birthYear) {
+      setPartnerBirthYear(birthYear)
+    }
+  }, [needPartnerInfo])
+
+  useEffect(() => {
+    if (needChildInfo && children.length === 0) {
+      setChildren([{ id: Date.now().toString(), birthYear: '' }])
+    } else if (!needChildInfo) {
+      setChildren([])
+    }
+  }, [needChildInfo])
+
+  // 添加/删除/更新孩子
+  const addChild = () => {
+    if (children.length < 10) {
+      setChildren([...children, { id: Date.now().toString(), birthYear: '' }])
+    }
+  }
+  const removeChild = (childId: string) => {
+    if (children.length > 1) {
+      setChildren(children.filter(c => c.id !== childId))
+    }
+  }
+  const updateChildBirthYear = (childId: string, value: string) => {
+    setChildren(children.map(c => c.id === childId ? { ...c, birthYear: value } : c))
+  }
+
+  // 检查是否有需要更新的保单
+  const checkAffectedPolicies = () => {
+    const selfMember = familyMembers.find(m => m.entity === '本人')
+    const spouseMember = familyMembers.find(m => m.entity === '配偶')
+    const childMembers = familyMembers.filter(m => isChildEntity(m.entity))
+    
+    const changes: string[] = []
+    let affectedPolicyCount = 0
+    
+    // 检查本人出生年份变化
+    if (selfMember && selfMember.birthYear !== parseInt(birthYear)) {
+      const policyCount = getMemberPolicyCount('本人')
+      if (policyCount > 0) {
+        changes.push(`本人出生年份从 ${selfMember.birthYear} 改为 ${birthYear}，将影响 ${policyCount} 份保单的理赔金额计算`)
+        affectedPolicyCount += policyCount
+      }
+    }
+    
+    // 检查配偶变化
+    if (needPartnerInfo && spouseMember && spouseMember.birthYear !== parseInt(partnerBirthYear)) {
+      const policyCount = getMemberPolicyCount('配偶')
+      if (policyCount > 0) {
+        changes.push(`配偶出生年份从 ${spouseMember.birthYear} 改为 ${partnerBirthYear}，将影响 ${policyCount} 份保单`)
+        affectedPolicyCount += policyCount
+      }
+    }
+    
+    // 检查孩子变化
+    childMembers.forEach((child, i) => {
+      if (i < children.length && child.birthYear !== parseInt(children[i].birthYear)) {
+        const policyCount = policies.filter(p => p.insuredPerson === '孩子').length
+        if (policyCount > 0) {
+          changes.push(`孩子出生年份变化，将影响 ${policyCount} 份保单`)
+          affectedPolicyCount += policyCount
+        }
+      }
+    })
+    
+    return { changes, affectedPolicyCount }
+  }
+
+  // 保存家庭信息
+  const handleSaveFamilyInfo = async () => {
+    if (!birthYear || !gender || !maritalStatus) {
+      message.warning('请完整填写本人信息和当前状态')
+      return
+    }
+    if (needPartnerInfo && !partnerBirthYear) {
+      message.warning('请填写伴侣出生年份')
+      return
+    }
+    if (needChildInfo && children.some(c => !c.birthYear)) {
+      message.warning('请填写所有孩子的出生年份')
+      return
+    }
+
+    // 检查是否有受影响的保单
+    const { changes, affectedPolicyCount } = checkAffectedPolicies()
+    
+    if (affectedPolicyCount > 0) {
+      Modal.confirm({
+        title: '确认修改家庭成员信息',
+        content: (
+          <div>
+            <p style={{ marginBottom: '12px', color: '#ff4d4f' }}>
+              此操作将影响 <strong>{affectedPolicyCount}</strong> 份保单的理赔金额计算：
+            </p>
+            <ul style={{ paddingLeft: '20px', color: '#666' }}>
+              {changes.map((change, i) => (
+                <li key={i} style={{ marginBottom: '4px' }}>{change}</li>
+              ))}
+            </ul>
+            <p style={{ marginTop: '12px', color: '#999', fontSize: '12px' }}>
+              系统将自动重新计算受影响保单的各阶段理赔金额
+            </p>
+          </div>
+        ),
+        okText: '确认修改',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: () => doSaveFamilyInfo(),
+      })
+    } else {
+      doSaveFamilyInfo()
+    }
+  }
+
+  // 实际执行保存
+  const doSaveFamilyInfo = async () => {
+    try {
+      setSaving(true)
+      const userId = 1
+
+      const selfMember = familyMembers.find(m => m.entity === '本人')
+      const spouseMember = familyMembers.find(m => m.entity === '配偶')
+      const childMembers = familyMembers.filter(m => isChildEntity(m.entity))
+
+      // 1. 处理本人信息
+      if (selfMember) {
+        await updateFamilyMember(selfMember.id, { entity: '本人', birthYear: parseInt(birthYear), gender })
+      } else {
+        await createFamilyMember({ userId, entity: '本人', birthYear: parseInt(birthYear), gender })
+      }
+
+      // 2. 处理配偶信息
+      if (needPartnerInfo) {
+        const partnerGender = gender === '男' ? '女' : '男'
+        if (spouseMember) {
+          await updateFamilyMember(spouseMember.id, { entity: '配偶', birthYear: parseInt(partnerBirthYear), gender: partnerGender })
+        } else {
+          await createFamilyMember({ userId, entity: '配偶', birthYear: parseInt(partnerBirthYear), gender: partnerGender })
+        }
+      } else if (spouseMember) {
+        // 尝试删除配偶，如果有保单则保留
+        try {
+          await deleteFamilyMember(spouseMember.id)
+        } catch (e: any) {
+          console.log('配偶有关联保单，保留记录')
+        }
+      }
+
+      // 3. 处理孩子信息
+      if (needChildInfo) {
+        // 按出生年份排序现有孩子（从大到小，即老大最先）
+        const sortedChildMembers = [...childMembers].sort((a, b) => a.birthYear - b.birthYear)
+        
+        // 更新现有孩子的出生年份（保持 entity 不变，避免唯一约束冲突）
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i]
+          if (i < sortedChildMembers.length) {
+            // 更新现有孩子，只更新 birthYear，不改变 entity
+            await updateFamilyMember(sortedChildMembers[i].id, { birthYear: parseInt(child.birthYear), gender: '男' })
+          } else {
+            // 创建新孩子，使用新的 entity 名称
+            const childEntityNames = ['老大', '老二', '老三', '老四', '老五']
+            // 找一个未被使用的 entity
+            const usedEntities = sortedChildMembers.map(m => m.entity)
+            let childEntity = childEntityNames.find(name => !usedEntities.includes(name)) || `孩子${i + 1}`
+            await createFamilyMember({ userId, entity: childEntity, birthYear: parseInt(child.birthYear), gender: '男' })
+          }
+        }
+        
+        // 删除多余的孩子（只删除没有保单的）
+        for (let i = children.length; i < sortedChildMembers.length; i++) {
+          try {
+            await deleteFamilyMember(sortedChildMembers[i].id)
+          } catch (e: any) {
+            console.log('孩子有关联保单，保留记录')
+          }
+        }
+      } else {
+        // 不需要孩子信息，尝试删除所有孩子
+        for (const child of childMembers) {
+          try {
+            await deleteFamilyMember(child.id)
+          } catch (e: any) {
+            console.log('孩子有关联保单，保留记录')
+          }
+        }
+      }
+
+      message.success('家庭信息保存成功，相关保单已更新')
+      setShowFamilyForm(false) // 收起表单
+      loadData() // 重新加载数据
+    } catch (error: any) {
+      console.error('保存失败:', error)
+      message.error(error.response?.data?.error || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 计算每个成员的保单数量
+  const getMemberPolicyCount = (entity: string) => {
+    return policies.filter(p => p.insuredPerson === entity).length
   }
 
   // 筛选保单
   const getFilteredPolicies = () => {
-    if (!filteredMember) return policies
-    return policies.filter(p => p.insuredPerson === filteredMember)
+    if (!filteredMemberId) return policies
+    const member = familyMembers.find(m => m.id === filteredMemberId)
+    if (!member) return policies
+    return policies.filter(p => p.insuredPerson === member.entity)
   }
 
   // 删除保单
-  const handleDelete = async (id: number) => {
+  const handleDeletePolicy = async (id: number) => {
     Modal.confirm({
       title: '确认删除',
       content: '确定要删除这份保单吗？',
@@ -85,7 +392,7 @@ export default function PolicyManagerHomePage() {
         try {
           await removePolicy(id)
           message.success('删除成功')
-          loadPolicies()
+          loadData()
         } catch (error) {
           message.error('删除失败')
         }
@@ -93,369 +400,369 @@ export default function PolicyManagerHomePage() {
     })
   }
 
-  const { stats, total } = getMemberStats()
-  const displayMembers = getDisplayMembers()
+  // 获取分类的家庭成员
+  const selfMember = familyMembers.find(m => m.entity === '本人')
+  const spouseMember = familyMembers.find(m => m.entity === '配偶')
+  const childMembers = familyMembers.filter(m => isChildEntity(m.entity))
+  // 构建去重后的成员列表：本人只取第一个，配偶只取第一个，孩子可以有多个
+  const displayMembers = [
+    ...(selfMember ? [selfMember] : []),
+    ...(spouseMember ? [spouseMember] : []),
+    ...childMembers
+  ]
+
   const displayPolicies = getFilteredPolicies()
+  const totalPolicies = policies.length
+  const familyStatus = getFamilyStatus(displayMembers)
+  const familyImage = getFamilyImage(displayMembers, selfMember?.gender || null)
+  const maritalStatusOptions = getMaritalStatusOptions(gender)
 
   return (
-    <div style={{ minHeight: '100vh', padding: '24px' }}>
-      {/* 顶部标题区域 - 参考zhichu1 */}
-      <div style={{ 
-        maxWidth: '1400px',
-        margin: '0 auto',
-        marginBottom: '32px'
-      }}>
-        <div style={{ 
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: '16px'
-        }}>
-          <h1 style={{ 
-            fontSize: '30px',
-            fontWeight: 700,
-            color: '#1f2937',
-            margin: 0
-          }}>
+    <div style={{ minHeight: '100vh', padding: '24px', background: '#f0f8fc' }}>
+      {/* 顶部标题区域 */}
+      <div style={{ maxWidth: '1400px', margin: '0 auto', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '16px' }}>
+          <h1 style={{ fontSize: '30px', fontWeight: 700, color: '#2A2A36', margin: 0 }}>
             我的家庭保单
           </h1>
-          <p style={{
-            fontSize: '14px',
-            color: '#6b7280',
-            margin: 0,
-            fontWeight: 400
-          }}>
+          <p style={{ fontSize: '14px', color: '#6b7280', margin: 0, fontWeight: 400 }}>
             全方位保单管理，助力美好未来
           </p>
         </div>
         </div>
 
-        {/* 保单卡片容器 */}
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+
+        {/* 家庭信息登记表单（展开时显示） */}
+        {showFamilyForm && (
       <div style={{ 
-        maxWidth: '1400px',
-        margin: '0 auto'
-      }}>
-          {/* 家庭成员统计卡片 */}
+            marginBottom: '24px',
+            background: '#fff',
+            borderRadius: '2.5rem',
+            padding: '32px 40px',
+            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+            border: '1px solid #e5e7eb'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 600, color: '#1f2937', margin: 0 }}>
+                家庭成员信息登记
+              </h2>
+              {displayMembers.length > 0 && (
+                <button
+                  onClick={() => setShowFamilyForm(false)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '13px',
+                    color: '#666',
+                    background: '#f5f5f5',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  收起
+                </button>
+              )}
+            </div>
+
+            {/* 第一行：出生年份 + 性别 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '24px' }}>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', fontSize: '20px', fontWeight: 600, color: '#1f2937', marginBottom: '12px' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#01BCD6" strokeWidth="2" style={{ marginRight: '12px' }}>
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="21" y2="10"></line>
+                  </svg>
+                  出生年份
+                </label>
+                <Select value={birthYear} onChange={setBirthYear} style={{ width: '100%', height: '51px' }} size="large">
+                  {years.map(year => <Select.Option key={year} value={year.toString()}>{year}年</Select.Option>)}
+                </Select>
+              </div>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', fontSize: '20px', fontWeight: 600, color: '#1f2937', marginBottom: '12px' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#01BCD6" strokeWidth="2" style={{ marginRight: '12px' }}>
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  性别
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '32px', height: '51px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                    <input type="radio" name="gender" value="男" checked={gender === '男'} onChange={(e) => setGender(e.target.value)} style={{ width: '20px', height: '20px', marginRight: '8px', accentColor: '#01BCD6' }} />
+                    <span style={{ fontSize: '18px', fontWeight: 500 }}>男</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                    <input type="radio" name="gender" value="女" checked={gender === '女'} onChange={(e) => setGender(e.target.value)} style={{ width: '20px', height: '20px', marginRight: '8px', accentColor: '#01BCD6' }} />
+                    <span style={{ fontSize: '18px', fontWeight: 500 }}>女</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* 当前状态 - 四宫格图片选择 */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', fontSize: '20px', fontWeight: 600, color: '#1f2937', marginBottom: '12px' }}>当前状态</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                {maritalStatusOptions.map(option => (
+                  <div
+                    key={option.value}
+                    onClick={() => setMaritalStatus(option.value)}
+                    style={{
+                      cursor: 'pointer',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      border: maritalStatus === option.value ? '2px solid #01BCD6' : '1px solid rgba(1, 188, 214, 0.3)',
+                      background: maritalStatus === option.value ? 'linear-gradient(135deg, rgba(1, 188, 214, 0.1), rgba(1, 188, 214, 0.05))' : '#fafafa',
+                      transition: 'all 0.3s',
+                      transform: maritalStatus === option.value ? 'scale(1.02)' : 'scale(1)',
+                      boxShadow: maritalStatus === option.value ? '0 4px 12px rgba(1, 188, 214, 0.2)' : '0 2px 4px rgba(0,0,0,0.05)',
+                      position: 'relative'
+                    }}
+                  >
+                    {maritalStatus === option.value && (
+                      <div style={{ position: 'absolute', top: '8px', right: '8px', width: '20px', height: '20px', borderRadius: '50%', background: '#01BCD6', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                      </div>
+                    )}
+                    <div style={{ aspectRatio: '4/2.5', overflow: 'hidden' }}>
+                      <img src={option.image} alt={option.label} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </div>
+                    <div style={{ padding: '8px', borderTop: '1px solid rgba(1, 188, 214, 0.3)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 600, color: '#1f2937' }}>{option.label}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', color: '#6b7280', fontSize: '13px' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                养娃指孩子未结束教育阶段，需支持至教育结束
+              </div>
+            </div>
+
+            {/* 伴侣和孩子信息 */}
+            {(needPartnerInfo || needChildInfo) && (
+              <div style={{ display: 'grid', gridTemplateColumns: needPartnerInfo && needChildInfo ? '1fr 1fr' : '1fr', gap: '24px', marginBottom: '24px' }}>
+                {needPartnerInfo && (
+                  <div style={{ padding: '16px 20px', background: 'rgba(1, 188, 214, 0.05)', borderRadius: '2rem', border: '1px solid rgba(1, 188, 214, 0.4)' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', fontSize: '16px', fontWeight: 600, color: '#1f2937', marginBottom: '12px' }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e91e63" strokeWidth="2" style={{ marginRight: '12px' }}><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                      伴侣出生年份
+                    </label>
+                    <Select value={partnerBirthYear || undefined} onChange={setPartnerBirthYear} placeholder="选择出生年份" style={{ width: '100%', height: '48px' }} size="large">
+                      {years.map(year => <Select.Option key={year} value={year.toString()}>{year}年</Select.Option>)}
+                    </Select>
+                  </div>
+                )}
+                {needChildInfo && (
+                  <div style={{ padding: '16px 20px', background: 'rgba(1, 188, 214, 0.05)', borderRadius: '2rem', border: '1px solid rgba(1, 188, 214, 0.4)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', fontSize: '16px', fontWeight: 600, color: '#1f2937' }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2196f3" strokeWidth="2" style={{ marginRight: '12px' }}><circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path><line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line></svg>
+                        孩子出生年份
+                      </label>
+                      {children.length < 10 && (
+                        <button onClick={addChild} style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', fontSize: '13px', color: '#01BCD6', background: 'transparent', border: '1px solid rgba(1, 188, 214, 0.4)', borderRadius: '20px', cursor: 'pointer' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                          添加孩子
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                      {children.map((child, index) => (
+                        <div key={child.id} style={{ position: 'relative' }}>
+                          <Select value={child.birthYear || undefined} onChange={(value) => updateChildBirthYear(child.id, value)} placeholder="选择出生年份" style={{ width: '100%', height: '48px' }} size="large">
+                            {childYears.map(year => <Select.Option key={year} value={year.toString()}>{year}年</Select.Option>)}
+                          </Select>
+                          {index > 0 && (
+                            <button onClick={() => removeChild(child.id)} style={{ position: 'absolute', top: '-8px', right: '-8px', width: '24px', height: '24px', borderRadius: '50%', background: '#fff', border: 'none', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ff4d4f' }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 操作按钮 */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button
+                onClick={handleSaveFamilyInfo}
+                disabled={saving || !maritalStatus}
+                style={{
+                  padding: '12px 48px',
+                  fontSize: '16px',
+                  fontWeight: 600,
+                  color: '#fff',
+                  background: (!maritalStatus || saving) ? '#ccc' : '#01BCD6',
+                  border: 'none',
+                  borderRadius: '24px',
+                  cursor: (!maritalStatus || saving) ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(1, 188, 214, 0.3)'
+                }}
+              >
+                {saving ? '保存中...' : '完成录入'}
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 家庭信息卡片（表单收起时显示） */}
+        {!showFamilyForm && displayMembers.length > 0 && (
           <div style={{ 
             marginBottom: '24px',
-            background: 'rgba(255, 255, 255, 0.7)',
+            padding: '24px 32px',
+            background: 'rgba(255, 255, 255, 0.5)',
             backdropFilter: 'blur(12px)',
             WebkitBackdropFilter: 'blur(12px)',
-            borderRadius: '16px',
-            padding: '16px 24px',
-            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.08)',
-            border: '1px solid rgba(255, 255, 255, 0.7)'
+            borderRadius: '24px',
+            border: '1px solid rgba(255, 255, 255, 0.8)',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.06)',
+            position: 'relative'
           }}>
-            <div style={{ 
+            {/* 右上角：家庭成员信息修改按钮 */}
+            <button
+              onClick={() => setShowFamilyForm(true)}
+              style={{
+                position: 'absolute',
+                top: '16px',
+                right: '24px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 16px',
+                fontSize: '14px',
+                fontWeight: 500,
+                color: '#01BCD6',
+                background: 'transparent',
+                border: '1px solid #01BCD6',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                zIndex: 10
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+              家庭成员信息修改
+            </button>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '32px' }}>
+              {/* 家庭图片 - 更大尺寸 */}
+              <div 
+                onClick={() => setFilteredMemberId(null)} 
+                style={{ 
               display: 'flex', 
-              alignItems: 'flex-end',
-              gap: '48px',
-              overflowX: 'auto'
-            }}>
-              {displayMembers.map(member => {
-                const count = member.key === 'all' ? total : (stats[member.key] || 0)
-                const isSelected = member.key === 'all' ? !filteredMember : filteredMember === member.key
-                const isFamily = member.key === 'all'
-                const imgSize = isFamily ? 120 : 90
-                
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  cursor: 'pointer',
+                  padding: '8px',
+                  borderRadius: '16px',
+                  background: !filteredMemberId ? 'rgba(1, 188, 214, 0.08)' : 'transparent',
+                  transition: 'all 0.3s'
+                }}
+              >
+                <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '8px', fontWeight: 500 }}>家庭</div>
+                <div style={{ width: '180px', height: '112px', borderRadius: '12px', overflow: 'hidden', transition: 'all 0.3s' }}>
+                  <img src={familyImage} alt="家庭" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { (e.target as HTMLImageElement).src = '/images/family-married-child.png' }} />
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 600, color: !filteredMemberId ? '#01BCD6' : '#333', marginTop: '8px' }}>{totalPolicies}份保单</div>
+              </div>
+
+              {/* 成员头像列表 */}
+              {displayMembers.map((member, index) => {
+                const isSelected = filteredMemberId === member.id
+                // 直接使用 entity 作为显示名称（孩子已经存储为老大、老二等）
+                const displayName = member.entity
                 return (
                   <div
-                    key={member.key}
-                    onClick={() => setFilteredMember(member.key === 'all' ? null : member.key)}
+                    key={member.id} 
+                    onClick={() => setFilteredMemberId(member.id)} 
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      justifyContent: 'flex-start',
-                      width: `${imgSize}px`,
-                      padding: '0',
-                      border: 'none',
-                      borderRadius: '0',
-                      background: 'transparent',
-                      transition: 'all 0.3s',
                       cursor: 'pointer',
-                      position: 'relative'
+                      padding: '8px',
+                      borderRadius: '16px',
+                      background: isSelected ? 'rgba(1, 188, 214, 0.08)' : 'transparent',
+                      transition: 'all 0.3s'
                     }}
                   >
-                    {/* 标签在图片上方 */}
-                    <div style={{
-                      fontSize: isFamily ? '14px' : '12px',
-                      color: '#6b7280',
-                      marginBottom: '8px',
-                      textAlign: 'center'
-                    }}>
-                      {member.label}
+                    <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: '8px', fontWeight: 500 }}>{displayName}</div>
+                    <div style={{ width: '88px', height: '88px', borderRadius: '12px', overflow: 'hidden', transition: 'all 0.3s' }}>
+                      <img src={getAvatarByGenderAndEntity(member.gender, member.entity)} alt={member.entity} style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={(e) => { (e.target as HTMLImageElement).src = '/images/self.png' }} />
                     </div>
-                    
-                    {/* 图片 */}
-                    <div style={{ 
-                      position: 'relative',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: `${imgSize}px`,
-                      height: `${imgSize}px`,
-                      flexShrink: 0
-                    }}>
-                      {member.isImage ? (
-                        <div style={{
-                          width: `${imgSize}px`,
-                          height: `${imgSize}px`,
-                          borderRadius: isFamily ? '16px' : '12px',
-                          overflow: 'hidden'
-                        }}>
-                        <img 
-                          src={member.icon} 
-                          alt={member.label}
-                          style={{ 
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                              display: 'block'
-                          }}
-                          onError={(e) => console.error(`${member.label}图片加载失败`, e)}
-                        />
-                        </div>
-                      ) : (
-                        <div style={{ 
-                          fontSize: isFamily ? '50px' : '35px', 
-                          lineHeight: '1',
-                          width: `${imgSize}px`,
-                          height: `${imgSize}px`,
-                          borderRadius: isFamily ? '16px' : '12px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}>{member.icon}</div>
-                      )}
-                      </div>
-                    
-                    {/* 数字在图片下方 */}
-                      <div style={{
-                      fontSize: isFamily ? '18px' : '16px',
-                        fontWeight: 600,
-                      color: isSelected ? '#01BCD6' : '#333',
-                      marginTop: '8px',
-                      textAlign: 'center'
-                      }}>
-                        {count}份
-                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 600, color: isSelected ? '#01BCD6' : '#333', marginTop: '8px' }}>{getMemberPolicyCount(member.entity)}份</div>
                   </div>
                 )
               })}
             </div>
           </div>
+        )}
 
           {/* 保单卡片列表 */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-            gap: '20px'
-          }}>
-            {/* 保单卡片 */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
             {displayPolicies.map(policy => {
-              const currentYear = new Date().getFullYear()
               const endYear = policy.coverageEndYear || policy.policyInfo?.coverageEndYear
               const isActive = !endYear || endYear === '终身' || endYear === 'lifetime' || parseInt(String(endYear)) >= currentYear
               
               return (
               <div
                 key={policy.id}
-                style={{
-                  position: 'relative',
-                  background: 'white',
-                  borderRadius: '12px',
-                  padding: '16px',
-                  border: '1px solid #f3f4f6',
-                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
-                  transition: 'all 0.3s',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  cursor: 'default'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = '#01BCD6'
-                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.2)'
-                  e.currentTarget.style.transform = 'translateY(-2px)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = '#e0e0e0'
-                  e.currentTarget.style.boxShadow = 'none'
-                  e.currentTarget.style.transform = 'translateY(0)'
-                }}
+                style={{ position: 'relative', background: 'white', borderRadius: '12px', padding: '16px', border: '1px solid #f3f4f6', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', transition: 'all 0.3s' }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#01BCD6'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.2)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e0e0e0'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
               >
-                {/* 左上角圆形印章 - 叠加盖章效果 */}
-                <div style={{
-                  position: 'absolute',
-                  top: '-20px',
-                  left: '-20px',
-                  width: '55px',
-                  height: '55px',
-                  borderRadius: '50%',
-                  background: isActive ? 'rgba(22, 163, 74, 0.1)' : 'rgba(220, 38, 38, 0.1)',
-                  backdropFilter: 'blur(12px) saturate(180%)',
-                  WebkitBackdropFilter: 'blur(12px) saturate(180%)',
-                  border: `0.5px solid ${isActive ? '#16a34a' : '#dc2626'}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: isActive ? '#16a34a' : '#dc2626',
-                  fontSize: '15px',
-                  fontWeight: 800,
-                  boxShadow: '0 6px 16px rgba(0, 0, 0, 0.25), inset 0 2px 4px rgba(255, 255, 255, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.2)',
-                  zIndex: 10,
-                  transform: 'rotate(-15deg)',
-                  letterSpacing: '1px'
-                }}>
+                <div style={{ position: 'absolute', top: '-20px', left: '-20px', width: '55px', height: '55px', borderRadius: '50%', background: isActive ? 'rgba(22, 163, 74, 0.1)' : 'rgba(220, 38, 38, 0.1)', backdropFilter: 'blur(12px)', border: `0.5px solid ${isActive ? '#16a34a' : '#dc2626'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: isActive ? '#16a34a' : '#dc2626', fontSize: '15px', fontWeight: 800, boxShadow: '0 6px 16px rgba(0, 0, 0, 0.25)', zIndex: 10, transform: 'rotate(-15deg)' }}>
                   {isActive ? '有效' : '失效'}
                 </div>
-
-                {/* 标题栏：保险名称 + 类型标签 */}
                 <div style={{ marginBottom: '12px', paddingBottom: '12px', borderBottom: '1px solid #01BCD6', marginTop: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-                    {/* 左侧：保险名称 + 类型标签 */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#333' }}>
-                    {policy.productName}
-                  </h3>
-                  <span style={{
-                    background: '#f0f8fc',
-                    color: '#01BCD6',
-                    padding: '4px 12px',
-                    borderRadius: '12px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                        whiteSpace: 'nowrap',
-                        lineHeight: '1.5',
-                        display: 'inline-block'
-                  }}>
-                    {POLICY_TYPE_MAP[policy.policyType] || policy.policyType}
-                  </span>
+                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{policy.productName}</h3>
+                        <span style={{ background: '#f0f8fc', color: '#01BCD6', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>{POLICY_TYPE_MAP[policy.policyType] || policy.policyType}</span>
+                      </div>
+                      {policy.policyIdNumber && (
+                        <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {policy.policyIdNumber}
+                        </div>
+                      )}
                     </div>
-                    
-                    {/* 右侧：编辑删除图标按钮，与标签底部对齐 */}
-                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                      <span
-                        onClick={() => navigate(`/smart-input?editId=${policy.id}`)}
-                        style={{
-                          cursor: 'pointer',
-                          fontSize: '18px',
-                          color: '#01BCD6',
-                          transition: 'all 0.3s'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = '#00a8bd'
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = '#01BCD6'
-                        }}
-                      >
-                        ✏️
+                    <div style={{ display: 'flex', gap: '6px', flexShrink: 0, marginLeft: '8px', marginTop: '2px' }}>
+                      <span onClick={() => navigate(`/smart-input?editId=${policy.id}`)} style={{ cursor: 'pointer', padding: '4px' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#01BCD6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                       </span>
-                      <span
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(Number(policy.id!))
-                        }}
-                        style={{
-                          cursor: 'pointer',
-                          fontSize: '18px',
-                          color: '#ff4d4f',
-                          transition: 'all 0.3s'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = '#d43f3f'
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = '#ff4d4f'
-                        }}
-                      >
-                        🗑️
+                      <span onClick={(e) => { e.stopPropagation(); handleDeletePolicy(Number(policy.id!)) }} style={{ cursor: 'pointer', padding: '4px' }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b6b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                       </span>
                     </div>
                   </div>
                 </div>
-
-                {/* 保单信息 */}
-                <div style={{ flex: 1, fontSize: '14px', color: '#666', lineHeight: '1.8' }}>
+                <div style={{ fontSize: '14px', color: '#666', lineHeight: '1.8' }}>
                   <div><strong>保险公司：</strong>{policy.insuranceCompany}</div>
-                  <div><strong>被保险人：</strong>{policy.insuredPerson} ({(policy.birthYear || policy.policyInfo?.birthYear) ? `${policy.birthYear || policy.policyInfo?.birthYear}年出生` : '出生年份未知'})</div>
+                  <div><strong>被保险人：</strong>{policy.insuredPerson} ({policy.birthYear || policy.policyInfo?.birthYear}年出生)</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                    <div><strong>投保开始：</strong>{
-                      (() => {
-                        const startYear = policy.policyStartYear || policy.policyInfo?.policyStartYear;
-                        const birthYear = policy.birthYear || policy.policyInfo?.birthYear;
-                        if (!startYear) return '未填写';
-                        if (!birthYear) return `${startYear}年`;
-                        const age = startYear - birthYear;
-                        // 只显示合理的年龄（0-150岁之间）
-                        if (age >= 0 && age <= 150) {
-                          return `${startYear}年(${age}岁)`;
-                        }
-                        return `${startYear}年`;
-                      })()
-                    }</div>
-                    <div><strong>保障结束：</strong>{
-                      (() => {
-                        const coverageEndYear = policy.coverageEndYear ?? policy.policyInfo?.coverageEndYear;
-                        if (!coverageEndYear || coverageEndYear === 'lifetime') return '终身';
-                        if (coverageEndYear === null || coverageEndYear === undefined) return '终身';
-                        return `${coverageEndYear}年`;
-                      })()
-                    }</div>
+                    <div><strong>投保开始：</strong>{policy.policyStartYear || policy.policyInfo?.policyStartYear}年</div>
+                    <div><strong>保障结束：</strong>{(() => { const cey = policy.coverageEndYear ?? policy.policyInfo?.coverageEndYear; if (!cey || cey === 'lifetime') return '终身'; return `${cey}年` })()}</div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                    <div><strong>交费年限：</strong>{
-                      (() => {
-                        const paymentPeriod = policy.totalPaymentPeriod ?? policy.paymentPeriod ?? policy.policyInfo?.totalPaymentPeriod;
-                        if (!paymentPeriod || paymentPeriod === 'lifetime') return '终身';
-                        if (paymentPeriod === null || paymentPeriod === undefined) return '未填写';
-                        // 如果已经包含"年"字，直接返回，否则添加"年"
-                        return typeof paymentPeriod === 'string' && paymentPeriod.includes('年') 
-                          ? paymentPeriod 
-                          : `${paymentPeriod}年`;
-                      })()
-                    }</div>
-                    <div><strong>年交保费：</strong>¥{(policy.annualPremium || policy.policyInfo?.annualPremium || 0).toLocaleString()}</div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                    <div><strong>已交年数：</strong>{
-                      (() => {
-                        const currentYear = new Date().getFullYear();
-                        const startYear = policy.policyStartYear || policy.policyInfo?.policyStartYear || currentYear;
-                        const paymentPeriod = policy.totalPaymentPeriod ?? policy.paymentPeriod ?? policy.policyInfo?.totalPaymentPeriod;
-                        // 当年算作已交过，所以是 currentYear - startYear + 1
-                        const paidYears = Math.max(0, currentYear - startYear + 1);
-                        const maxYears = typeof paymentPeriod === 'number' ? paymentPeriod : 999;
-                        return `${Math.min(paidYears, maxYears)}年`;
-                      })()
-                    }</div>
-                    <div><strong>待交年数：</strong>{
-                      (() => {
-                        const paymentPeriod = policy.totalPaymentPeriod ?? policy.paymentPeriod ?? policy.policyInfo?.totalPaymentPeriod;
-                        if (!paymentPeriod || paymentPeriod === 'lifetime') return '终身';
-                        if (paymentPeriod === null || paymentPeriod === undefined) return '未填写';
-                        const currentYear = new Date().getFullYear();
-                        const startYear = policy.policyStartYear || policy.policyInfo?.policyStartYear || currentYear;
-                        // 当年算作已交过，所以已交年数是 currentYear - startYear + 1
-                        const paidYears = Math.max(0, currentYear - startYear + 1);
-                        // 确保paymentPeriod转换为数字（处理字符串格式如"10年"）
-                        let paymentPeriodNum: number;
-                        if (typeof paymentPeriod === 'string') {
-                          // 提取数字，如"10年" -> 10
-                          const match = paymentPeriod.match(/\d+/);
-                          paymentPeriodNum = match ? parseInt(match[0], 10) : NaN;
-                        } else {
-                          paymentPeriodNum = paymentPeriod;
-                        }
-                        if (isNaN(paymentPeriodNum) || paymentPeriodNum <= 0) return '未填写';
-                        const remaining = Math.max(0, paymentPeriodNum - paidYears);
-                        return `${remaining}年`;
-                      })()
-                    }</div>
+                    <div><strong>交费年限：</strong>{policy.paymentPeriod || policy.totalPaymentPeriod || '未填写'}年</div>
+                    <div><strong>年交保费：</strong>¥{(policy.annualPremium || 0).toLocaleString()}</div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
                     <div><strong>保障责任：</strong>{policy.coverages?.length || 0}项</div>
-                  <div><strong>基本保额：</strong>{((policy.basicSumInsured || policy.policyInfo?.basicSumInsured || 0) / 10000).toFixed(0)}万元</div>
+                    <div><strong>基本保额：</strong>{((policy.basicSumInsured || 0) / 10000).toFixed(0)}万元</div>
                   </div>
                 </div>
               </div>
@@ -463,20 +770,14 @@ export default function PolicyManagerHomePage() {
             })}
           </div>
 
-          {/* 空状态 */}
-          {displayPolicies.length === 0 && !loading && (
-            <div style={{
-              textAlign: 'center',
-              padding: '60px 20px',
-              color: '#999'
-            }}>
+        {displayPolicies.length === 0 && !loading && !showFamilyForm && (
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999' }}>
               <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
-              <div style={{ fontSize: '16px' }}>
-                {filteredMember ? '该成员暂无保单' : '暂无保单，点击左侧"保单智能录入"开始录入'}
-              </div>
+            <div style={{ fontSize: '16px' }}>{filteredMemberId ? '该成员暂无保单' : '暂无保单，点击左侧"保单智能录入"开始录入'}</div>
             </div>
           )}
       </div>
     </div>
   )
 }
+

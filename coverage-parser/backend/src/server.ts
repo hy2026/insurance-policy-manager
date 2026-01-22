@@ -12,6 +12,7 @@ import { policyRouter } from './routes/policyRouter';
 import { productRouter } from './routes/productRouter';
 import { trainingRouter } from './routes/trainingRouter';
 import { coverageLibraryRouter } from './routes/coverageLibraryRouter';
+import insuredPersonRoutes from './routes/insuredPersonRoutes';
 
 // 加载环境变量
 dotenv.config();
@@ -41,6 +42,7 @@ app.use('/api/policies', policyRouter);
 app.use('/api/products', productRouter);
 app.use('/api/training', trainingRouter);
 app.use('/api/coverage-library', coverageLibraryRouter);
+app.use('/api/insured-persons', insuredPersonRoutes);
 
 // 404 处理
 app.use((req, res) => {

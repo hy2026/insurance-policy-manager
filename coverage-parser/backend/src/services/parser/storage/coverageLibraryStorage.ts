@@ -6,6 +6,16 @@
 import prisma from '../../../prisma';
 import { HardRuleParser } from '../hardRuleParser';
 
+/**
+ * 规范化保险产品ID号：只保留中文+数字，删除所有其他字符
+ * 用于模糊匹配，支持不同类型的括号和符号
+ * 例如：百年人寿【2025】疾病险 → 百年人寿2025疾病险
+ */
+function normalizePolicyId(policyId: string): string {
+  if (!policyId) return '';
+  return policyId.replace(/[^\u4e00-\u9fa5\d]/g, '');
+}
+
 export interface CoverageLibraryData {
   productId: number;
   coverageType: string;
@@ -231,9 +241,10 @@ export class CoverageLibraryStorage {
       where.isRequired = filters.isRequired;
     }
 
-    // 保单ID号筛选（现在使用数据库列）
-    if (filters.保单ID号) {
-      where.policyIdNumber = { contains: filters.保单ID号 };
+    // 保单ID号筛选 - 规范化匹配（不在数据库层过滤，在内存中过滤）
+    const normalizedSearchId = filters.保单ID号 ? normalizePolicyId(filters.保单ID号) : null;
+    if (normalizedSearchId) {
+      console.log('🔍 规范化后的保单ID号:', normalizedSearchId);
     }
 
     // 赔付次数筛选
@@ -271,9 +282,45 @@ export class CoverageLibraryStorage {
       orderBy = { createdAt: 'desc' };
     }
 
-    // 先查询总数
-    const total = await prisma.insuranceCoverageLibrary.count({ where });
+    // 如果有保单ID号搜索，需要获取所有数据后在内存中过滤
+    if (normalizedSearchId) {
+      const allData = await prisma.insuranceCoverageLibrary.findMany({
+        where,
+        include: {
+          product: true
+        },
+        orderBy
+      });
 
+      // 在内存中进行规范化匹配
+      const filteredData = allData.filter((item: any) => {
+        const normalizedPolicyId = normalizePolicyId(item.policyIdNumber || '');
+        return normalizedPolicyId.includes(normalizedSearchId);
+      });
+
+      const total = filteredData.length;
+      console.log(`📊 规范化匹配后总数: ${total} 条`);
+
+      // 手动分页
+      const paginatedData = filteredData.slice((page - 1) * pageSize, page * pageSize);
+      console.log(`📄 返回第${page}页，共${paginatedData.length}条`);
+
+      // 提取关键字段
+      const enrichedData = paginatedData.map(item => this.enrichCoverageData(item));
+
+      // 获取已审核数量
+      const verified = filteredData.filter((item: any) => item.verified === true).length;
+
+      return {
+        data: enrichedData,
+        total,
+        verified,
+        unverified: total - verified
+      };
+    }
+
+    // 普通查询（没有保单ID号搜索）
+    const total = await prisma.insuranceCoverageLibrary.count({ where });
     console.log(`📊 数据库筛选后总数: ${total} 条`);
 
     // 数据库层面分页查询
@@ -322,30 +369,14 @@ export class CoverageLibraryStorage {
       let 间隔期 = item.intervalPeriod;
       let 是否豁免 = item.isPremiumWaiver;
       
-      // 如果列是null，从parsedResult提取并异步更新（懒加载兜底）
-      const needsExtraction = !赔付次数 || 是否可以重复赔付 === null || 是否分组 === null || 间隔期 === null;
-      
-      if (needsExtraction) {
-        const note = parsedResult?.note || '';
-        const hardRuleFields = HardRuleParser.parseAdditionalFields(note || item.clauseText);
-        
-        // 提取并格式化字段
-        const extracted = this.extractFieldsForColumns({
-          parsedResult: item.parsedResult,
-          clauseText: item.clauseText
-        } as any);
-        
-        // 使用提取的值
-        赔付次数 = extracted.payoutCount || 赔付次数 || '1次';
-        是否可以重复赔付 = extracted.isRepeatablePayout !== null ? extracted.isRepeatablePayout : 是否可以重复赔付;
-        是否分组 = extracted.isGrouped !== null ? extracted.isGrouped : 是否分组;
-        间隔期 = extracted.intervalPeriod !== null ? extracted.intervalPeriod : 间隔期;
-        是否豁免 = extracted.isPremiumWaiver !== undefined ? extracted.isPremiumWaiver : (是否豁免 || false);
-        
-        // 异步更新数据库（不阻塞查询）
-        this.updateFieldsAsync(item.id, extracted).catch(err => {
-          console.error(`异步更新字段失败 (ID: ${item.id}):`, err);
-        });
+      // 如果列是null，从parsedResult提取（不再异步更新，提升查询性能）
+      if (!赔付次数 || 是否可以重复赔付 === null || 是否分组 === null) {
+        // 直接从 parsedResult 中获取，不触发数据库更新
+        赔付次数 = 赔付次数 || parsedResult?.赔付次数 || '1次';
+        是否可以重复赔付 = 是否可以重复赔付 ?? parsedResult?.是否可以重复赔付 ?? false;
+        是否分组 = 是否分组 ?? parsedResult?.是否分组 ?? false;
+        间隔期 = 间隔期 || parsedResult?.间隔期 || '';
+        是否豁免 = 是否豁免 ?? parsedResult?.是否豁免 ?? false;
       }
       
       // 判断是否为单次赔付
@@ -557,10 +588,8 @@ export class CoverageLibraryStorage {
       where.coverageName = { contains: cleanFilters.责任名称 };
     }
 
-    // 保单ID号筛选（现在使用数据库列）
-    if (cleanFilters.保单ID号) {
-      where.policyIdNumber = { contains: cleanFilters.保单ID号 };
-    }
+    // 保单ID号筛选 - 规范化匹配（不在数据库层过滤，在内存中过滤）
+    const normalizedSearchId = cleanFilters.保单ID号 ? normalizePolicyId(cleanFilters.保单ID号) : null;
 
     // 是否可以重复赔付筛选
     if (cleanFilters.是否可以重复赔付 !== undefined) {
@@ -584,7 +613,11 @@ export class CoverageLibraryStorage {
 
     // 数据库层面查询（已筛选）
     console.log('导出数据，where条件:', JSON.stringify(where));
-    const allData = await prisma.insuranceCoverageLibrary.findMany({
+    if (normalizedSearchId) {
+      console.log('🔍 规范化后的保单ID号:', normalizedSearchId);
+    }
+    
+    let allData = await prisma.insuranceCoverageLibrary.findMany({
       where,
       include: {
         product: {
@@ -601,6 +634,15 @@ export class CoverageLibraryStorage {
       }
     });
     console.log(`导出数据查询成功，共 ${allData.length} 条记录`);
+
+    // 如果有保单ID号搜索，在内存中进行规范化匹配
+    if (normalizedSearchId) {
+      allData = allData.filter((item: any) => {
+        const normalizedPolicyId = normalizePolicyId(item.policyIdNumber || '');
+        return normalizedPolicyId.includes(normalizedSearchId);
+      });
+      console.log(`规范化匹配后，共 ${allData.length} 条记录`);
+    }
 
     // 提取关键字段
     const enrichedData = allData.map(item => this.enrichCoverageData(item));

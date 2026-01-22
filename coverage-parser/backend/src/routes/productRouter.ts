@@ -9,6 +9,16 @@ import { ProductLibraryStorage } from '../services/parser/storage/productLibrary
 const router = Router();
 const productStorage = new ProductLibraryStorage();
 
+/**
+ * 规范化保险产品ID号：只保留中文+数字，删除所有其他字符
+ * 用于模糊匹配，支持不同类型的括号和符号
+ * 例如：百年人寿【2025】疾病险 → 百年人寿2025疾病险
+ */
+function normalizePolicyId(policyId: string): string {
+  if (!policyId) return '';
+  return policyId.replace(/[^\u4e00-\u9fa5\d]/g, '');
+}
+
 // 配置multer用于文件上传
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -39,7 +49,8 @@ router.get('/', async (req, res) => {
     };
     if (policyType) filters.policyType = String(policyType);
     if (insuranceCompany) filters.insuranceCompany = String(insuranceCompany);
-    if (保险产品ID号) filters.policyId = { contains: String(保险产品ID号) };
+    // 保险产品ID号 - 不在这里过滤，稍后在内存中规范化匹配
+    const normalizedSearchId = 保险产品ID号 ? normalizePolicyId(String(保险产品ID号)) : null;
     if (公司名称) filters.insuranceCompany = { contains: String(公司名称) };
     if (保险产品名称) filters.productName = { contains: String(保险产品名称) };
     if (保险大类) filters.productCategory = String(保险大类);
@@ -50,15 +61,53 @@ router.get('/', async (req, res) => {
     if (reviewStatus) filters.reviewStatus = String(reviewStatus);
 
     console.log('🔍 GET /api/products - filters:', JSON.stringify(filters));
+    if (normalizedSearchId) {
+      console.log('🔍 规范化后的保险产品ID号:', normalizedSearchId);
+    }
 
     const pageNum = parseInt(String(page), 10);
     const size = parseInt(String(pageSize), 10);
     
-    // 查询总数（受筛选影响）
+    // 如果有保险产品ID号搜索，需要获取所有数据后在内存中过滤
+    let allProducts = [];
+    if (normalizedSearchId) {
+      allProducts = await require('../prisma').default.insuranceProduct.findMany({
+        where: filters,
+        orderBy: { id: 'desc' }
+      });
+      
+      // 在内存中进行规范化匹配
+      allProducts = allProducts.filter((product: any) => {
+        const normalizedPolicyId = normalizePolicyId(product.policyId || '');
+        return normalizedPolicyId.includes(normalizedSearchId);
+      });
+      
+      const total = allProducts.length;
+      const products = allProducts.slice((pageNum - 1) * size, pageNum * size);
+      
+      console.log('📊 规范化匹配结果 total:', total);
+      
+      // 统计各类别数量（不受筛选影响，只统计全部数据）
+      const baseFilter = { source: 'imported' };
+      const byCategory = {
+        疾病险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '疾病险' } }),
+        人寿险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '人寿险' } }),
+        意外险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '意外险' } }),
+        年金险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '年金险' } })
+      };
+
+      return res.json({
+        success: true,
+        data: products,
+        total,
+        byCategory
+      });
+    }
+    
+    // 普通查询（没有保险产品ID号搜索）
     const total = await require('../prisma').default.insuranceProduct.count({ where: filters });
     console.log('📊 查询结果 total:', total);
     
-    // 查询分页数据（受筛选影响）
     const products = await require('../prisma').default.insuranceProduct.findMany({
       where: filters,
       skip: (pageNum - 1) * size,

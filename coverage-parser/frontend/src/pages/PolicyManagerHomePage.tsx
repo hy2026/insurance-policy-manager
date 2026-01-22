@@ -4,8 +4,9 @@ import { Modal, message, Select } from 'antd'
 import { getPolicies, removePolicy, getFamilyMembers, createFamilyMember, updateFamilyMember, deleteFamilyMember } from '@/services/api'
 import type { Policy } from '@/types'
 import type { FamilyMember } from '@/services/api'
+import PolicyDetailCard from '@/components/PolicyDetailCard'
 
-console.log('💎💎💎 版本 12.0 - 内嵌家庭登记表单 💎💎💎')
+console.log('💎💎💎 版本 13.0 - 添加保单详情展开 💎💎💎')
 
 // 根据性别动态生成婚育状态选项（参照zhichu1）
 const getMaritalStatusOptions = (gender: string) => [
@@ -91,6 +92,9 @@ export default function PolicyManagerHomePage() {
   const [partnerBirthYear, setPartnerBirthYear] = useState<string>('')
   const [children, setChildren] = useState<{ id: string; birthYear: string }[]>([])
   const [saving, setSaving] = useState(false)
+  
+  // 保单详情展开状态
+  const [expandedPolicyId, setExpandedPolicyId] = useState<string | number | null>(null)
 
   // 年份选项
   const years = Array.from({ length: 70 }, (_, i) => currentYear - 18 - i)
@@ -765,10 +769,132 @@ export default function PolicyManagerHomePage() {
                     <div><strong>基本保额：</strong>{((policy.basicSumInsured || 0) / 10000).toFixed(0)}万元</div>
                   </div>
                 </div>
+                
+                {/* 查看合同详情按钮 */}
+                <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #e5e7eb' }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setExpandedPolicyId(expandedPolicyId === policy.id ? null : policy.id!)
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      fontWeight: 500,
+                      color: '#01BCD6',
+                      background: expandedPolicyId === policy.id ? 'rgba(1, 188, 214, 0.1)' : 'transparent',
+                      border: expandedPolicyId === policy.id ? '2px solid #01BCD6' : '1px solid rgba(1, 188, 214, 0.3)',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (expandedPolicyId !== policy.id) {
+                        e.currentTarget.style.background = 'rgba(1, 188, 214, 0.05)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (expandedPolicyId !== policy.id) {
+                        e.currentTarget.style.background = 'transparent'
+                      }
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                      <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    {expandedPolicyId === policy.id ? '收起合同详情' : '查看合同详情'}
+                    <svg 
+                      width="14" 
+                      height="14" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2"
+                      style={{
+                        transform: expandedPolicyId === policy.id ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.3s'
+                      }}
+                    >
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </button>
+                </div>
               </div>
               )
             })}
           </div>
+
+        {/* 独立的详情展示区域 - 在卡片列表下方，宽度适中 */}
+        {expandedPolicyId && (() => {
+          const expandedPolicy = displayPolicies.find(p => p.id === expandedPolicyId)
+          if (!expandedPolicy) return null
+          return (
+            <div style={{
+              marginTop: '24px',
+              maxWidth: '900px', // 限制最大宽度，类似智能快录右侧比例
+              margin: '24px auto 0 auto', // 居中显示
+              background: 'linear-gradient(135deg, #f0f9fc 0%, #e8f4f8 100%)',
+              borderRadius: '16px',
+              border: '2px solid #01BCD6',
+              boxShadow: '0 8px 32px rgba(1, 188, 214, 0.15)',
+              overflow: 'hidden',
+              animation: 'slideDown 0.3s ease-out'
+            }}>
+              {/* 详情头部 - 显示产品名称 */}
+              <div style={{
+                padding: '16px 24px',
+                background: 'linear-gradient(90deg, #01BCD6 0%, #00A3BD 100%)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '20px' }}>📋</span>
+                  <span style={{ fontSize: '18px', fontWeight: 600, color: '#fff' }}>
+                    {expandedPolicy.productName} - 合同详情
+                  </span>
+                </div>
+                <button
+                  onClick={() => setExpandedPolicyId(null)}
+                  style={{
+                    padding: '6px 16px',
+                    fontSize: '13px',
+                    fontWeight: 500,
+                    color: '#fff',
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    border: '1px solid rgba(255, 255, 255, 0.4)',
+                    borderRadius: '20px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  收起详情
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="18 15 12 9 6 15"></polyline>
+                  </svg>
+                </button>
+              </div>
+              
+              {/* 详情内容 */}
+              <PolicyDetailCard
+                mode="accordion"
+                policy={expandedPolicy}
+                expanded={true}
+              />
+            </div>
+          )
+        })()}
 
         {displayPolicies.length === 0 && !loading && !showFamilyForm && (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999' }}>

@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { message, Modal, Form, Select, InputNumber } from 'antd'
 import { parseCoverage, addPolicy, editPolicy, getPolicyById, getProducts, getCoverageLibrary, getOrCreateInsuredPerson, getFamilyMembers, createFamilyMember, getPolicies } from '@/services/api'
-import type { Coverage, PolicyInfo } from '@/types'
+import type { Coverage, PolicyInfo, Policy } from '@/types'
 import type { FamilyMember } from '@/services/api'
 import InsuranceCompanySelector from '@/components/InsuranceCompanySelector'
 import ProductIdSelector from '@/components/ProductIdSelector'
+import PolicyDetailCard from '@/components/PolicyDetailCard'
 
 const POLICY_TYPES = [
   { value: 'annuity', label: '年金险' },
@@ -1028,6 +1029,7 @@ export default function SmartInputPage() {
   
   // 状态
   const [loading, setLoading] = useState(false)
+  const [previewDrawerVisible, setPreviewDrawerVisible] = useState(false)
   const [parseResult, setParseResult] = useState<any>(null)
   const [policyInfoChanged, setPolicyInfoChanged] = useState(false) // 跟踪基础信息是否已修改
   const [showCoverageInput, setShowCoverageInput] = useState(false) // 控制责任分析区域的显示
@@ -3003,39 +3005,80 @@ export default function SmartInputPage() {
 
             {/* 合同完成按钮 */}
             <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '2px solid #e0e0e0' }}>
-              <button
-                className="complete-btn"
-                onClick={handleComplete}
-                disabled={coverages.length === 0}
-                style={{ 
-                  width: '100%',
-                  backgroundColor: '#01BCD6',
-                  color: 'white',
-                  border: '2px solid #01BCD6',
-                  borderRadius: '8px',
-                  padding: '12px 32px',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  cursor: coverages.length === 0 ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.3s'
-                } as React.CSSProperties}
-                onMouseEnter={(e) => {
-                  if (coverages.length > 0) {
-                    e.currentTarget.style.backgroundColor = '#00A3BD'
-                    e.currentTarget.style.transform = 'translateY(-2px)'
-                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(1, 188, 214, 0.4)'
+              <div style={{ display: 'flex', gap: '12px' }}>
+                {/* 查看合同详情按钮 */}
+                <button
+                  onClick={() => setPreviewDrawerVisible(true)}
+                  disabled={coverages.length === 0}
+                  style={{ 
+                    flex: 1,
+                    backgroundColor: 'transparent',
+                    color: coverages.length === 0 ? '#ccc' : '#01BCD6',
+                    border: `1px solid ${coverages.length === 0 ? '#ccc' : '#01BCD6'}`,
+                    borderRadius: '8px',
+                    padding: '12px 24px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: coverages.length === 0 ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (coverages.length > 0) {
+                      e.currentTarget.style.backgroundColor = 'rgba(1, 188, 214, 0.1)'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                  </svg>
+                  查看合同详情
+                </button>
+                
+                {/* 保存合同按钮 */}
+                <button
+                  className="complete-btn"
+                  onClick={handleComplete}
+                  disabled={coverages.length === 0}
+                  style={{ 
+                    flex: 1,
+                    backgroundColor: '#01BCD6',
+                    color: 'white',
+                    border: '2px solid #01BCD6',
+                    borderRadius: '8px',
+                    padding: '12px 32px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: coverages.length === 0 ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.3s'
+                  } as React.CSSProperties}
+                  onMouseEnter={(e) => {
+                    if (coverages.length > 0) {
+                      e.currentTarget.style.backgroundColor = '#00A3BD'
+                      e.currentTarget.style.transform = 'translateY(-2px)'
+                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(1, 188, 214, 0.4)'
+                      e.currentTarget.style.borderColor = '#01BCD6'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#01BCD6'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                    e.currentTarget.style.boxShadow = 'none'
                     e.currentTarget.style.borderColor = '#01BCD6'
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#01BCD6'
-                  e.currentTarget.style.transform = 'translateY(0)'
-                  e.currentTarget.style.boxShadow = 'none'
-                  e.currentTarget.style.borderColor = '#01BCD6'
-                }}
-              >
-                ✅ 合同填写完成
-              </button>
+                  }}
+                >
+                  ✅ 保存合同
+                </button>
+              </div>
             </div>
           </div>
 
@@ -4087,7 +4130,41 @@ console.log(`[保存-重新计算] 基础信息: 投保金额=${basicSumInsuredW
           </div>
         </div>
       </div>
+      
+      {/* 合同详情预览 Drawer */}
+      <PolicyDetailCard
+        mode="drawer"
+        policy={buildPreviewPolicy()}
+        visible={previewDrawerVisible}
+        onClose={() => setPreviewDrawerVisible(false)}
+      />
     </div>
   )
+  
+  // 构建预览用的保单数据
+  function buildPreviewPolicy(): Policy {
+    return {
+      insuranceCompany: insuranceCompany || '未填写',
+      productName: productName || '未填写',
+      insuredPerson: insuredPerson || '未选择',
+      policyType: policyType,
+      policyIdNumber: productIdNumber,
+      birthYear: birthYear ? parseInt(birthYear) : 2000,
+      policyStartYear: policyStartYear ? parseInt(policyStartYear) : new Date().getFullYear(),
+      coverageEndYear: coverageEndYear === 'lifetime' ? 'lifetime' : (coverageEndYear ? parseInt(coverageEndYear) : 'lifetime'),
+      totalPaymentPeriod: totalPaymentPeriod,
+      annualPremium: annualPremium ? parseFloat(annualPremium) : 0,
+      basicSumInsured: basicSumInsured ? parseFloat(basicSumInsured) * 10000 : 0,
+      policyInfo: {
+        birthYear: birthYear ? parseInt(birthYear) : 2000,
+        policyStartYear: policyStartYear ? parseInt(policyStartYear) : new Date().getFullYear(),
+        coverageEndYear: coverageEndYear === 'lifetime' ? 'lifetime' : (coverageEndYear ? parseInt(coverageEndYear) : 'lifetime'),
+        basicSumInsured: basicSumInsured ? parseFloat(basicSumInsured) * 10000 : 0,
+        annualPremium: annualPremium ? parseFloat(annualPremium) : 0,
+        totalPaymentPeriod: totalPaymentPeriod,
+      },
+      coverages: coverages.filter(c => c.isSelected !== false)
+    }
+  }
 }
 

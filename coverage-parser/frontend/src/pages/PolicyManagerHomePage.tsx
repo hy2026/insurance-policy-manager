@@ -731,9 +731,7 @@ export default function PolicyManagerHomePage() {
                   padding: '16px', 
                   border: '1px solid #f3f4f6', 
                   boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', 
-                  transition: 'all 0.3s',
-                  zIndex: isExpanded ? 100 : 1, // 展开的卡片层级最高
-                  gridColumn: isExpanded ? '1 / -1' : 'auto' // 展开时占满整行
+                  transition: 'all 0.3s'
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#01BCD6'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.2)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
                 onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e0e0e0'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
@@ -841,23 +839,21 @@ export default function PolicyManagerHomePage() {
                   </button>
                 </div>
                 
-                {/* 详情展开区域 - 紧跟卡片，无缝展开，向右扩展到更大宽度 */}
+                {/* 详情展开区域 - 绝对定位浮层，不影响其他卡片布局 */}
                 {expandedPolicyId !== null && String(expandedPolicyId) === String(policy.id) && (
                   <div style={{
-                    marginTop: '0',
-                    marginLeft: '-16px',
-                    marginRight: '-16px',
-                    marginBottom: '-16px',
-                    width: 'calc(100% + 400px)', // 向右扩展400px，类似智能快录右侧宽度
-                    maxWidth: '800px', // 最大宽度800px
-                    borderTop: '2px solid #01BCD6',
+                    position: 'absolute',
+                    top: '100%',
+                    left: '0',
+                    marginTop: '8px',
+                    width: '750px', // 固定宽度，类似智能快录右侧
+                    maxWidth: '90vw',
+                    borderRadius: '12px',
                     background: 'linear-gradient(135deg, #f0f9fc 0%, #e8f4f8 100%)',
-                    borderBottomLeftRadius: '12px',
-                    borderBottomRightRadius: '12px',
+                    border: '2px solid #01BCD6',
                     overflow: 'hidden',
-                    boxShadow: '0 8px 24px rgba(1, 188, 214, 0.2)',
-                    position: 'relative',
-                    zIndex: 5
+                    boxShadow: '0 12px 40px rgba(1, 188, 214, 0.25)',
+                    zIndex: 1000
                   }}>
                     {/* 详情头部 */}
                     <div style={{

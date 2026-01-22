@@ -28,11 +28,20 @@ export default function PolicyDetailCard({
 }: PolicyDetailCardProps) {
   
   if (mode === 'drawer') {
+    const policyTypeMap: Record<string, string> = {
+      'critical_illness': '重疾险',
+      'life': '人寿险',
+      'accident': '意外险',
+      'annuity': '年金险'
+    }
+    
     return (
       <Drawer
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '18px', fontWeight: 600, color: '#333' }}>📋 合同详情预览</span>
+            <span style={{ fontSize: '18px', fontWeight: 600, color: '#333' }}>
+              📋 {policy.productName} - {policyTypeMap[policy.policyType || ''] || policy.policyType}
+            </span>
           </div>
         }
         placement="right"

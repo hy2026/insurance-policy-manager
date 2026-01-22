@@ -204,21 +204,9 @@ export default function PolicyDetailContent({ policy, compact = false }: PolicyD
   return (
     <div style={{ padding: compact ? padding : '0', background: 'transparent' }}>
       {/* 保障责任与保额 */}
-      <Section title="保障责任与保额" rightElement={
-        <button style={{
-          padding: '4px 12px',
-          fontSize: '12px',
-          color: '#01BCD6',
-          background: 'rgba(1, 188, 214, 0.1)',
-          border: '1px solid rgba(1, 188, 214, 0.3)',
-          borderRadius: '12px',
-          cursor: 'pointer'
-        }}>
-          病种
-        </button>
-      }>
+      <Section title="保障责任与保额">
         <div style={{ marginBottom: '8px' }}>
-          <span style={{ color: '#01BCD6', fontSize: '13px' }}>▶ 保险金额：</span>
+          <span style={{ color: '#01BCD6', fontSize: '13px' }}>▶ 基本保额：</span>
           <span style={{ color: '#01BCD6', fontSize: '28px', fontWeight: 700 }}>{mainAmount}</span>
           <span style={{ color: '#01BCD6', fontSize: '14px' }}>万</span>
         </div>
@@ -226,75 +214,95 @@ export default function PolicyDetailContent({ policy, compact = false }: PolicyD
           保额即保险金额，指被保险人出险后能拿到的保险赔付金额
         </p>
         
-        {/* 保额层级图 - 四宫格展示各类责任保额 */}
-        <div style={{
-          background: 'rgba(1, 188, 214, 0.06)',
-          borderRadius: '12px',
-          padding: '16px',
-          border: '1px solid rgba(1, 188, 214, 0.15)'
-        }}>
-          {/* 重疾保险金 - 最大的框，单独一行 */}
-          <div style={{
-            background: 'linear-gradient(135deg, rgba(1, 188, 214, 0.2) 0%, rgba(1, 188, 214, 0.1) 100%)',
-            borderRadius: '10px',
-            padding: '16px 20px',
-            marginBottom: '12px',
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '16px',
-            border: '1px solid rgba(1, 188, 214, 0.3)'
-          }}>
-            <span style={{ color: '#01BCD6', fontSize: '16px', fontWeight: 600 }}>重大疾病保险金</span>
-            <span style={{ color: '#01BCD6', fontSize: '24px', fontWeight: 700 }}>
-              {criticalAmount > 0 ? `${criticalAmount}万` : `${mainAmount}万`}
-            </span>
-          </div>
+        {/* 责任金额比例图 - 横向堆叠条形图 */}
+        {(() => {
+          // 构建有金额的责任列表
+          const responsibilities = [
+            { name: '重疾责任', amount: criticalAmount > 0 ? criticalAmount : mainAmount, color: '#01BCD6', bgColor: 'rgba(1, 188, 214, 0.15)' },
+            { name: '中症责任', amount: moderateAmount, color: '#f57c00', bgColor: 'rgba(255, 167, 38, 0.15)' },
+            { name: '轻症责任', amount: mildAmount, color: '#43a047', bgColor: 'rgba(102, 187, 106, 0.15)' },
+            { name: '其他疾病责任', amount: otherAmount, color: '#7b1fa2', bgColor: 'rgba(156, 39, 176, 0.15)' }
+          ].filter(r => r.amount > 0) // 只显示金额大于0的责任
           
-          {/* 中症、轻症、其他疾病 - 三列并排显示，响应式布局 */}
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
-            gap: '12px' 
-          }}>
+          const totalAmount = responsibilities.reduce((sum, r) => sum + r.amount, 0)
+          
+          return (
             <div style={{
-              background: 'rgba(255, 167, 38, 0.1)',
-              borderRadius: '8px',
-              padding: '12px',
-              textAlign: 'center',
-              border: '1px solid rgba(255, 167, 38, 0.3)'
+              background: 'rgba(1, 188, 214, 0.04)',
+              borderRadius: '12px',
+              padding: '20px',
+              border: '1px solid rgba(1, 188, 214, 0.15)'
             }}>
-              <div style={{ fontSize: '13px', color: '#f57c00', marginBottom: '6px', fontWeight: 500 }}>中症疾病保险金</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#e65100' }}>
-                {moderateAmount > 0 ? `${moderateAmount}万` : '-'}
+              {/* 横向堆叠条形图 */}
+              <div style={{
+                display: 'flex',
+                height: '80px',
+                borderRadius: '10px',
+                overflow: 'hidden',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+                marginBottom: '20px'
+              }}>
+                {responsibilities.map((resp, index) => {
+                  const percentage = (resp.amount / totalAmount) * 100
+                  return (
+                    <div
+                      key={resp.name}
+                      style={{
+                        width: `${percentage}%`,
+                        background: resp.bgColor,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        padding: '12px 8px',
+                        borderRight: index < responsibilities.length - 1 ? '2px solid #fff' : 'none',
+                        transition: 'all 0.3s'
+                      }}
+                    >
+                      <div style={{ 
+                        fontSize: '13px', 
+                        color: resp.color, 
+                        fontWeight: 600,
+                        marginBottom: '4px',
+                        textAlign: 'center',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        width: '100%'
+                      }}>
+                        {resp.name}
+                      </div>
+                      <div style={{ 
+                        fontSize: '18px', 
+                        fontWeight: 700, 
+                        color: resp.color 
+                      }}>
+                        {resp.amount}万
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* 图例说明 */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', justifyContent: 'center' }}>
+                {responsibilities.map(resp => (
+                  <div key={resp.name} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ 
+                      width: '12px', 
+                      height: '12px', 
+                      borderRadius: '3px', 
+                      background: resp.color 
+                    }} />
+                    <span style={{ fontSize: '12px', color: '#666' }}>
+                      {resp.name}：{resp.amount}万 ({((resp.amount / totalAmount) * 100).toFixed(1)}%)
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
-            <div style={{
-              background: 'rgba(102, 187, 106, 0.1)',
-              borderRadius: '8px',
-              padding: '12px',
-              textAlign: 'center',
-              border: '1px solid rgba(102, 187, 106, 0.3)'
-            }}>
-              <div style={{ fontSize: '13px', color: '#43a047', marginBottom: '6px', fontWeight: 500 }}>轻症疾病保险金</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#2e7d32' }}>
-                {mildAmount > 0 ? `${mildAmount}万` : '-'}
-              </div>
-            </div>
-            <div style={{
-              background: 'rgba(156, 39, 176, 0.08)',
-              borderRadius: '8px',
-              padding: '12px',
-              textAlign: 'center',
-              border: '1px solid rgba(156, 39, 176, 0.2)'
-            }}>
-              <div style={{ fontSize: '13px', color: '#7b1fa2', marginBottom: '6px', fontWeight: 500 }}>其他疾病保险金</div>
-              <div style={{ fontSize: '18px', fontWeight: 700, color: '#6a1b9a' }}>
-                {otherAmount > 0 ? `${otherAmount}万` : '-'}
-              </div>
-            </div>
-          </div>
-        </div>
+          )
+        })()}
       </Section>
       
       {/* 保障期限 */}

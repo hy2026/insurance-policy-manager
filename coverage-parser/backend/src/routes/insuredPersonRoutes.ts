@@ -162,41 +162,50 @@ router.put('/:id', async (req: Request, res: Response) => {
         // 终身保障固定100岁，否则根据保障结束年份计算
         const newEndAge = coverageEndYear === null ? 100 : coverageEndYear - birthYear;
         
+        // 🔑 更新tiers的辅助函数
+        const updateTiers = (tiers: any[]) => {
+          return tiers.map((tier: any) => {
+            // 🔑 重新计算 startAge：使用新的投保年龄
+            if (tier.startAge != null) {
+              tier.startAge = newPolicyStartAge;
+            }
+            // 🔑 重新计算 endAge：终身=100岁，否则根据保障结束年份计算
+            if (tier.endAge != null) {
+              tier.endAge = newEndAge;
+            }
+            
+            // 重新生成 keyAmounts（根据新的年龄范围）
+            if (tier.keyAmounts && Array.isArray(tier.keyAmounts)) {
+              const startAge = tier.startAge || newPolicyStartAge;
+              const endAge = tier.endAge || newEndAge;
+              
+              // 保留第一个金额作为模板
+              const templateAmount = tier.keyAmounts[0]?.amount || 0;
+              
+              // 重新生成每年的金额
+              const newKeyAmounts = [];
+              for (let age = startAge; age <= endAge; age++) {
+                newKeyAmounts.push({
+                  year: birthYear + age,
+                  age: age,
+                  amount: templateAmount
+                });
+              }
+              tier.keyAmounts = newKeyAmounts;
+            }
+            return tier;
+          });
+        };
+        
         if (coverages && Array.isArray(coverages)) {
           // 更新每个 coverage 中的年龄范围和 keyAmounts
           coverages = coverages.map(coverage => {
+            // 🔑 同时处理 parseResult 和 result 两种数据结构
             if (coverage.parseResult?.payoutAmount?.details?.tiers) {
-              coverage.parseResult.payoutAmount.details.tiers = coverage.parseResult.payoutAmount.details.tiers.map((tier: any) => {
-                // 🔑 重新计算 startAge：使用新的投保年龄
-                if (tier.startAge != null) {
-                  tier.startAge = newPolicyStartAge;
-                }
-                // 🔑 重新计算 endAge：终身=100岁，否则根据保障结束年份计算
-                if (tier.endAge != null) {
-                  tier.endAge = newEndAge;
-                }
-                
-                // 重新生成 keyAmounts（根据新的年龄范围）
-                if (tier.keyAmounts && Array.isArray(tier.keyAmounts)) {
-                  const startAge = tier.startAge || newPolicyStartAge;
-                  const endAge = tier.endAge || newEndAge;
-                  
-                  // 保留第一个金额作为模板
-                  const templateAmount = tier.keyAmounts[0]?.amount || 0;
-                  
-                  // 重新生成每年的金额
-                  const newKeyAmounts = [];
-                  for (let age = startAge; age <= endAge; age++) {
-                    newKeyAmounts.push({
-                      year: birthYear + age,
-                      age: age,
-                      amount: templateAmount
-                    });
-                  }
-                  tier.keyAmounts = newKeyAmounts;
-                }
-                return tier;
-              });
+              coverage.parseResult.payoutAmount.details.tiers = updateTiers(coverage.parseResult.payoutAmount.details.tiers);
+            }
+            if (coverage.result?.payoutAmount?.details?.tiers) {
+              coverage.result.payoutAmount.details.tiers = updateTiers(coverage.result.payoutAmount.details.tiers);
             }
             return coverage;
           });

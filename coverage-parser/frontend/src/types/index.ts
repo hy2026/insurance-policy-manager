@@ -111,6 +111,7 @@ export interface Policy {
   productName: string
   insuredPerson: string
   policyType?: string
+  productSubCategory?: string  // 保险小类：重疾保险/防癌保险等
   policyInfo: PolicyInfo
   coverages: Coverage[]
   // 以下字段是为了兼容性，允许直接在顶层访问

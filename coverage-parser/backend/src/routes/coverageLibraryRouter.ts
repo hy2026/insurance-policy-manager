@@ -88,23 +88,27 @@ router.get('/', async (req, res) => {
       保单ID号,
       责任类型,
       责任名称,
+      责任小类,
+      责任层级,
       isRequired,
       赔付次数,
       是否可以重复赔付,
       是否分组,
       是否豁免,
       是否已审核,
+      reviewStatus,
+      aiModified,
       sortBy = '序号',
       sortOrder = 'asc'
     } = req.query;
-
-    console.log('收到请求:', { page, pageSize, 保单ID号, 责任类型, 责任名称, isRequired, 赔付次数, sortBy, sortOrder });
 
     // 清理空字符串，转换为undefined
     const cleanFilters: any = {};
     if (保单ID号 && 保单ID号 !== '') cleanFilters.保单ID号 = 保单ID号 as string;
     if (责任类型 && 责任类型 !== '') cleanFilters.责任类型 = 责任类型 as string;
     if (责任名称 && 责任名称 !== '') cleanFilters.责任名称 = 责任名称 as string;
+    if (责任小类 && 责任小类 !== '') cleanFilters.责任小类 = 责任小类 as string;
+    if (责任层级 && 责任层级 !== '') cleanFilters.责任层级 = 责任层级 as string;
     if (isRequired && isRequired !== '') cleanFilters.isRequired = isRequired as string;
     if (赔付次数 && 赔付次数 !== '') cleanFilters.赔付次数 = 赔付次数 as string;
     if (是否可以重复赔付 === 'true') cleanFilters.是否可以重复赔付 = true;
@@ -115,6 +119,13 @@ router.get('/', async (req, res) => {
     else if (是否豁免 === 'false') cleanFilters.是否豁免 = false;
     if (是否已审核 === 'true') cleanFilters.是否已审核 = true;
     else if (是否已审核 === 'false') cleanFilters.是否已审核 = false;
+    if (reviewStatus && reviewStatus !== '') cleanFilters.reviewStatus = reviewStatus as string;
+    if (aiModified === 'true') cleanFilters.aiModified = true;
+    else if (aiModified === 'false') cleanFilters.aiModified = false;
+
+    // 调试日志：查看排序参数
+    console.log('🔍 [排序调试] sortBy:', sortBy, 'sortOrder:', sortOrder);
+    console.log('🔍 [排序调试] cleanFilters:', cleanFilters);
 
     const result = await coverageLibraryStorage.findWithPagination({
       page: Number(page),
@@ -123,8 +134,6 @@ router.get('/', async (req, res) => {
       sortBy: sortBy as string,
       sortOrder: sortOrder as 'asc' | 'desc'
     });
-
-    console.log('查询成功，返回数据条数:', result.data.length);
 
     res.json({
       success: true,
@@ -241,9 +250,9 @@ router.get('/export', async (req, res) => {
       
       // 设置表头
       const headers = [
-        '序号', '保单ID号', '责任名称', '是否必选', '责任原文', '自然语言描述', 
+        '序号', '保单ID号', '责任名称', '可选/必选', '责任原文', '自然语言描述', 
         '赔付金额', '赔付次数', '是否可以重复赔付', '是否分组', 
-        '间隔期', '是否豁免', '审核状态', '解析结果JSON'
+        '间隔期', '是否豁免', '审批结果', '审批备注', 'AI是否修改', 'AI修改说明', '解析结果JSON'
       ];
       
       worksheet.columns = headers.map(header => {
@@ -304,7 +313,7 @@ router.get('/export', async (req, res) => {
               '序号': item.序号 || item.parsedResult?.序号 || '(无)',
               '保单ID号': item.保单ID号 || item.parsedResult?.保单ID号 || '',
               '责任名称': item.责任名称 || item.coverageName || '',
-              '是否必选': item.isRequired || '可选',
+              '可选/必选': item.isRequired || '可选',
               '责任原文': item.责任原文 || item.clauseText || '',
               '自然语言描述': naturalLanguageDesc,
               '赔付金额': payoutAmount,
@@ -319,7 +328,12 @@ router.get('/export', async (req, res) => {
                 ? '一次赔付不涉及'
                 : (item.间隔期 || '无间隔期'),
               '是否豁免': item.是否豁免 ? '是' : '否',
-              '审核状态': item.verified ? '已审核' : '未审核',
+              '审批结果': item.reviewStatus === 'approved' ? '已通过' 
+                         : item.reviewStatus === 'rejected' ? '未通过'
+                         : '待审核',
+              '审批备注': item.reviewNotes || '',
+              'AI是否修改': item.aiModified ? '是' : '否',
+              'AI修改说明': item.aiModificationNote || '',
               '解析结果JSON': jsonData
             };
             const addedRow = worksheet.addRow(row);
@@ -472,6 +486,43 @@ router.put('/:id', async (req, res) => {
     });
   } catch (error: any) {
     console.error('更新责任失败:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+/**
+ * 更新审批信息
+ * PUT /api/coverage-library/:id/review
+ */
+router.put('/:id/review', async (req, res) => {
+  try {
+    const { reviewStatus, reviewNotes } = req.body;
+    
+    // 验证reviewStatus的值
+    const validStatuses = ['pending', 'approved', 'rejected'];
+    if (reviewStatus && !validStatuses.includes(reviewStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: '无效的审批状态'
+      });
+    }
+
+    const coverage = await coverageLibraryStorage.update(Number(req.params.id), {
+      reviewStatus: reviewStatus || 'pending',
+      reviewNotes: reviewNotes || null,
+      updatedAt: new Date()
+    });
+
+    res.json({
+      success: true,
+      data: coverage,
+      message: '审批信息已更新'
+    });
+  } catch (error: any) {
+    console.error('更新审批信息失败:', error);
     res.status(500).json({
       success: false,
       message: error.message

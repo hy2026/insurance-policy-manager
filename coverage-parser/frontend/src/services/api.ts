@@ -245,8 +245,6 @@ export async function getCoverageLibrary(filters?: {
     params: filters
   })
   
-  console.log('getCoverageLibrary 原始响应:', response) // 调试用
-  
   // 后端返回格式：{ success: true, data: [...], total: ..., verified: ..., unverified: ... }
   // 响应拦截器已经提取了response.data，所以response就是 { success: true, data: [...], total: ... }
   if (response && response.success !== undefined) {

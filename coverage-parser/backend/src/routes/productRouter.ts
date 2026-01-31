@@ -9,6 +9,11 @@ import { ProductLibraryStorage } from '../services/parser/storage/productLibrary
 const router = Router();
 const productStorage = new ProductLibraryStorage();
 
+// 类别统计缓存（每5分钟更新一次）
+let categoryCacheData: any = null;
+let categoryCacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5分钟
+
 /**
  * 规范化保险产品ID号：只保留中文+数字，删除所有其他字符
  * 用于模糊匹配，支持不同类型的括号和符号
@@ -17,6 +22,33 @@ const productStorage = new ProductLibraryStorage();
 function normalizePolicyId(policyId: string): string {
   if (!policyId) return '';
   return policyId.replace(/[^\u4e00-\u9fa5\d]/g, '');
+}
+
+/**
+ * 获取类别统计（带缓存）
+ */
+async function getCategoryStats(prisma: any): Promise<any> {
+  const now = Date.now();
+  
+  // 如果缓存有效，直接返回
+  if (categoryCacheData && (now - categoryCacheTime < CACHE_TTL)) {
+    return categoryCacheData;
+  }
+  
+  // 缓存过期或不存在，重新查询
+  const baseFilter = { source: 'imported' };
+  const byCategory = {
+    疾病险: await prisma.insuranceProduct.count({ where: { ...baseFilter, productCategory: '疾病险' } }),
+    人寿险: await prisma.insuranceProduct.count({ where: { ...baseFilter, productCategory: '人寿险' } }),
+    意外险: await prisma.insuranceProduct.count({ where: { ...baseFilter, productCategory: '意外险' } }),
+    年金险: await prisma.insuranceProduct.count({ where: { ...baseFilter, productCategory: '年金险' } })
+  };
+  
+  // 更新缓存
+  categoryCacheData = byCategory;
+  categoryCacheTime = now;
+  
+  return byCategory;
 }
 
 // 配置multer用于文件上传
@@ -41,7 +73,9 @@ router.get('/', async (req, res) => {
       保障期限,
       交费期限,
       销售状态,
-      reviewStatus
+      reviewStatus,
+      sortField,
+      sortOrder
     } = req.query;
 
     const filters: any = {
@@ -60,10 +94,17 @@ router.get('/', async (req, res) => {
     if (销售状态) filters.salesStatus = String(销售状态);
     if (reviewStatus) filters.reviewStatus = String(reviewStatus);
 
-    console.log('🔍 GET /api/products - filters:', JSON.stringify(filters));
-    if (normalizedSearchId) {
-      console.log('🔍 规范化后的保险产品ID号:', normalizedSearchId);
-    }
+    // 处理排序
+    const sortFieldMap: { [key: string]: string } = {
+      '序号': 'id',
+      '疾病责任数': 'diseaseCount',
+      '身故责任数': 'deathCount',
+      '意外责任数': 'accidentCount',
+      '年金责任数': 'annuityCount'
+    };
+    
+    const dbSortField = sortField ? sortFieldMap[String(sortField)] || 'id' : 'id';
+    const dbSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
 
     const pageNum = parseInt(String(page), 10);
     const size = parseInt(String(pageSize), 10);
@@ -71,30 +112,45 @@ router.get('/', async (req, res) => {
     // 如果有保险产品ID号搜索，需要获取所有数据后在内存中过滤
     let allProducts = [];
     if (normalizedSearchId) {
-      allProducts = await require('../prisma').default.insuranceProduct.findMany({
-        where: filters,
-        orderBy: { id: 'desc' }
+      const prisma = require('../prisma').default;
+      
+      // 先获取所有数据并排序
+      allProducts = await prisma.insuranceProduct.findMany({
+        where: filters
       });
       
-      // 在内存中进行规范化匹配
+      // 在内存中进行规范化匹配和过滤
       allProducts = allProducts.filter((product: any) => {
         const normalizedPolicyId = normalizePolicyId(product.policyId || '');
         return normalizedPolicyId.includes(normalizedSearchId);
       });
       
+      // 在内存中排序，确保null值排在最后
+      const isCountField = ['diseaseCount', 'deathCount', 'accidentCount', 'annuityCount'].includes(dbSortField);
+      allProducts.sort((a: any, b: any) => {
+        const aVal = a[dbSortField];
+        const bVal = b[dbSortField];
+        
+        // null值始终排在最后
+        if (aVal === null && bVal === null) return 0;
+        if (aVal === null) return 1;
+        if (bVal === null) return -1;
+        
+        // 正常排序
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+          return dbSortOrder === 'desc' 
+            ? bVal.localeCompare(aVal)
+            : aVal.localeCompare(bVal);
+        }
+        
+        return dbSortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+      });
+      
       const total = allProducts.length;
       const products = allProducts.slice((pageNum - 1) * size, pageNum * size);
       
-      console.log('📊 规范化匹配结果 total:', total);
-      
-      // 统计各类别数量（不受筛选影响，只统计全部数据）
-      const baseFilter = { source: 'imported' };
-      const byCategory = {
-        疾病险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '疾病险' } }),
-        人寿险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '人寿险' } }),
-        意外险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '意外险' } }),
-        年金险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '年金险' } })
-      };
+      // 统计各类别数量（使用缓存）
+      const byCategory = await getCategoryStats(prisma);
 
       return res.json({
         success: true,
@@ -105,24 +161,47 @@ router.get('/', async (req, res) => {
     }
     
     // 普通查询（没有保险产品ID号搜索）
-    const total = await require('../prisma').default.insuranceProduct.count({ where: filters });
-    console.log('📊 查询结果 total:', total);
+    const prisma = require('../prisma').default;
+    const total = await prisma.insuranceProduct.count({ where: filters });
     
-    const products = await require('../prisma').default.insuranceProduct.findMany({
-      where: filters,
-      skip: (pageNum - 1) * size,
-      take: size,
-      orderBy: { id: 'desc' }
-    });
+    // 对于责任数量字段，需要特殊处理null值排序
+    const isCountField = ['diseaseCount', 'deathCount', 'accidentCount', 'annuityCount'].includes(dbSortField);
     
-    // 统计各类别数量（不受筛选影响，只统计全部数据）
-    const baseFilter = { source: 'imported' }; // 只查询Excel导入的产品
-    const byCategory = {
-      疾病险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '疾病险' } }),
-      人寿险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '人寿险' } }),
-      意外险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '意外险' } }),
-      年金险: await require('../prisma').default.insuranceProduct.count({ where: { ...baseFilter, productCategory: '年金险' } })
-    };
+    let products;
+    if (isCountField) {
+      // 获取所有数据，在内存中排序以正确处理null值
+      const allData = await prisma.insuranceProduct.findMany({
+        where: filters
+      });
+      
+      // 在内存中排序，null值始终排在最后
+      allData.sort((a: any, b: any) => {
+        const aVal = a[dbSortField];
+        const bVal = b[dbSortField];
+        
+        // null值排在最后
+        if (aVal === null && bVal === null) return 0;
+        if (aVal === null) return 1;
+        if (bVal === null) return -1;
+        
+        // 正常数值比较
+        return dbSortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+      });
+      
+      // 分页
+      products = allData.slice((pageNum - 1) * size, pageNum * size);
+    } else {
+      // 其他字段直接使用数据库排序
+      products = await prisma.insuranceProduct.findMany({
+        where: filters,
+        skip: (pageNum - 1) * size,
+        take: size,
+        orderBy: { [dbSortField]: dbSortOrder }
+      });
+    }
+    
+    // 统计各类别数量（使用缓存）
+    const byCategory = await getCategoryStats(prisma);
 
     res.json({
       success: true,
@@ -456,6 +535,10 @@ router.post('/import', upload.single('file'), async (req, res) => {
     console.log('🔄 开始从责任库重新统计责任数量...');
     await recalculateResponsibilityCounts(prisma);
     console.log('✅ 责任数量统计完成');
+    
+    // 清除类别统计缓存
+    categoryCacheData = null;
+    categoryCacheTime = 0;
 
     res.json({
       success: true,

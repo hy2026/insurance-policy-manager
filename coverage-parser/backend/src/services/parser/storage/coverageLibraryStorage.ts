@@ -28,6 +28,9 @@ export interface CoverageLibraryData {
   verified?: boolean;
   isTrainingSample?: boolean;
   annotationQuality?: string;
+  reviewStatus?: string;
+  reviewNotes?: string | null;
+  updatedAt?: Date;
 }
 
 export class CoverageLibraryStorage {
@@ -210,6 +213,8 @@ export class CoverageLibraryStorage {
       是否分组?: boolean;
       是否豁免?: boolean;
       是否已审核?: boolean;
+      reviewStatus?: string;
+      aiModified?: boolean;
     };
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
@@ -270,6 +275,16 @@ export class CoverageLibraryStorage {
     // 是否已审核筛选
     if (filters.是否已审核 !== undefined) {
       where.verified = filters.是否已审核;
+    }
+
+    // 审批结果筛选
+    if (filters.reviewStatus) {
+      where.reviewStatus = filters.reviewStatus;
+    }
+
+    // AI是否修改筛选
+    if (filters.aiModified !== undefined) {
+      where.aiModified = filters.aiModified;
     }
 
     // 构建排序条件（现在使用数据库列）
@@ -388,6 +403,8 @@ export class CoverageLibraryStorage {
         保单ID号: item.policyIdNumber || parsedResult?.保单ID号 || parsedResult?.产品编码, // 优先使用数据库列
         责任类型: parsedResult?.责任类型 || parsedResult?.险种类型 || item.coverageType,
         责任名称: parsedResult?.责任名称 || item.coverageName,
+        责任小类: item.diseaseCategory || parsedResult?.责任小类 || '', // 责任小类
+        责任层级: item.responsibilityLevel || parsedResult?.责任层级 || '', // 责任层级（主责任/副责任）
         isRequired: item.isRequired || '可选', // 是否必选
         责任原文: parsedResult?.责任原文 || item.clauseText,
         naturalLanguageDesc: parsedResult?.payoutAmount?.map((p: any) => p.naturalLanguageDescription) || [],
@@ -398,6 +415,11 @@ export class CoverageLibraryStorage {
         是否分组: 是否分组 !== null ? 是否分组 : (isSinglePayout ? undefined : false),
         间隔期: 间隔期 !== null && 间隔期 !== '' ? 间隔期 : (isSinglePayout ? undefined : ''),
         是否豁免: 是否豁免 || false,
+        // 审核信息
+        reviewStatus: item.reviewStatus || 'pending',
+        reviewNotes: item.reviewNotes || null,
+        reviewedBy: item.reviewedBy || null,
+        reviewedAt: item.reviewedAt || null,
         _isSinglePayout: isSinglePayout
       };
     } catch (error: any) {
@@ -410,13 +432,20 @@ export class CoverageLibraryStorage {
         保单ID号: item.policyIdNumber || parsedResult?.保单ID号 || parsedResult?.产品编码,
         责任类型: parsedResult?.责任类型 || parsedResult?.险种类型 || item?.coverageType,
         责任名称: parsedResult?.责任名称 || item?.coverageName,
+        责任小类: item.diseaseCategory || parsedResult?.责任小类 || '', // 责任小类
+        责任层级: item.responsibilityLevel || parsedResult?.责任层级 || '', // 责任层级（主责任/副责任）
         isRequired: item.isRequired || '可选',
         责任原文: parsedResult?.责任原文 || item?.clauseText,
         赔付次数: item.payoutCount || '1次',
         是否可以重复赔付: item.isRepeatablePayout !== null ? item.isRepeatablePayout : false,
         是否分组: item.isGrouped !== null ? item.isGrouped : false,
         间隔期: item.intervalPeriod || '',
-        是否豁免: item.isPremiumWaiver || false
+        是否豁免: item.isPremiumWaiver || false,
+        // 审核信息
+        reviewStatus: item.reviewStatus || 'pending',
+        reviewNotes: item.reviewNotes || null,
+        reviewedBy: item.reviewedBy || null,
+        reviewedAt: item.reviewedAt || null
       };
     }
   }
@@ -464,13 +493,17 @@ export class CoverageLibraryStorage {
   }
 
   /**
-   * 从JSON导入数据（完全覆盖模式 - 简化版）
+   * 从JSON导入数据（完全覆盖模式 - 批量优化版）
    */
   async importFromJson(cases: any[], batchInfo?: any) {
-    const results = [];
     let successCount = 0;
     let failCount = 0;
+    const validRecords = [];
+    const skippedRecords = [];
 
+    console.log(`\n📦 开始处理 ${cases.length} 条数据...`);
+
+    // 第一步：验证并准备数据
     for (const caseItem of cases) {
       try {
         // 提取信息（支持多种字段名）
@@ -487,47 +520,96 @@ export class CoverageLibraryStorage {
         责任类型 = typeMapping[责任类型] || 责任类型;
         
         const 责任名称 = caseItem.责任名称 || caseItem['责任名称'];
+        const 责任小类 = caseItem.责任小类 || caseItem['责任小类'] || null;
+        const 责任层级 = caseItem.责任层级 || caseItem['责任层级'] || null;
         const 责任原文 = caseItem.责任原文 || caseItem['责任原文'];
         const 序号 = caseItem.序号 || caseItem['序号'] || null;
         const isRequired = caseItem.是否必选 || caseItem['是否必选'] || caseItem.isRequired || '可选';
-        const payoutAmount = caseItem.payoutAmount || [];
-        const note = caseItem.note;
 
         if (!责任名称 || !责任原文) {
-          console.warn('跳过无效数据:', caseItem);
+          skippedRecords.push({ 序号, reason: '缺少责任名称或责任原文' });
           failCount++;
           continue;
         }
 
-        // 直接创建责任记录（不创建产品，保持独立）
-        // 注意：schema中productId是Int?，允许为null
-        const coverage = await prisma.insuranceCoverageLibrary.create({
-          data: {
-            coverageType: 责任类型,
-            coverageName: 责任名称,
-            isRequired: isRequired,
-            clauseText: 责任原文,
-            parsedResult: caseItem,
-            parseMethod: 'imported',
-            verified: false,
-            policyIdNumber: 保单ID号,
-            sequenceNumber: 序号 ? parseInt(序号.toString()) : null
-          }
+        // 提取审核信息
+        const reviewStatus = caseItem.reviewStatus || 'pending';
+        const reviewNotes = caseItem.reviewNotes || null;
+        
+        validRecords.push({
+          coverageType: 责任类型,
+          coverageName: 责任名称,
+          diseaseCategory: 责任小类,
+          responsibilityLevel: 责任层级,
+          isRequired: isRequired,
+          clauseText: 责任原文,
+          parsedResult: caseItem,
+          parseMethod: 'imported',
+          verified: false,
+          policyIdNumber: 保单ID号,
+          sequenceNumber: 序号 ? parseInt(序号.toString()) : null,
+          reviewStatus: reviewStatus,
+          reviewNotes: reviewNotes
         });
-
-        results.push(coverage);
-        successCount++;
       } catch (error: any) {
-        console.error('导入单条数据失败:', error, caseItem);
+        console.error('处理数据失败:', error.message);
         failCount++;
       }
     }
+
+    console.log(`✓ 验证完成: ${validRecords.length} 条有效, ${failCount} 条无效`);
+
+    if (skippedRecords.length > 0) {
+      console.log(`⚠️  跳过的记录:`, skippedRecords.slice(0, 5));
+    }
+
+    // 第二步：批量插入（每次100条，更小批次以提高成功率）
+    const BATCH_SIZE = 100;
+    const totalBatches = Math.ceil(validRecords.length / BATCH_SIZE);
+    const failedBatches: number[] = [];
+
+    for (let i = 0; i < totalBatches; i++) {
+      const start = i * BATCH_SIZE;
+      const end = Math.min(start + BATCH_SIZE, validRecords.length);
+      const batch = validRecords.slice(start, end);
+
+      try {
+        const result = await prisma.insuranceCoverageLibrary.createMany({
+          data: batch,
+          skipDuplicates: false
+        });
+        successCount += result.count;
+        console.log(`  ✓ 批次 ${i + 1}/${totalBatches}: 插入 ${result.count} 条（序号 ${batch[0].sequenceNumber}-${batch[batch.length-1].sequenceNumber}）`);
+      } catch (error: any) {
+        console.error(`  ✗ 批次 ${i + 1}/${totalBatches} 失败:`, error.message);
+        console.error(`     序号范围: ${batch[0].sequenceNumber}-${batch[batch.length-1].sequenceNumber}`);
+        failedBatches.push(i + 1);
+        
+        // 批次失败时，尝试逐条插入以找出问题记录
+        console.log(`     尝试逐条插入该批次...`);
+        for (const record of batch) {
+          try {
+            await prisma.insuranceCoverageLibrary.create({ data: record });
+            successCount++;
+          } catch (singleError: any) {
+            console.error(`       ✗ 序号 ${record.sequenceNumber} 插入失败: ${singleError.message}`);
+            failCount++;
+          }
+        }
+      }
+    }
+
+    if (failedBatches.length > 0) {
+      console.log(`\n⚠️  失败的批次: ${failedBatches.join(', ')}`);
+    }
+
+    console.log(`\n✅ 导入完成: 成功 ${successCount} 条, 失败 ${failCount} 条\n`);
 
     return {
       count: successCount,
       success: successCount,
       failed: failCount,
-      results
+      results: []  // 批量插入不返回具体记录
     };
   }
 

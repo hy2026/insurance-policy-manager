@@ -75,6 +75,10 @@ model InsuranceProduct {
   @@index([productCategory])
   @@index([salesStatus])
   @@index([trainingStatus])
+  @@index([diseaseCount])
+  @@index([deathCount])
+  @@index([accidentCount])
+  @@index([annuityCount])
   @@map("insurance_product_library")
 }
 
@@ -156,7 +160,8 @@ model InsuranceCoverageLibrary {
   coverageType        String    // 疾病责任/身故责任/意外责任/年金责任/满期责任/生存金/其他
   coverageName        String
   isRequired          String    @default("可选") // 可选/必选
-  diseaseCategory     String?   // 重症/中症/轻症/特殊疾病/其他（仅疾病责任）
+  diseaseCategory     String?   // 重疾责任/中症责任/轻症责任/前症责任/其他疾病责任
+  responsibilityLevel String?   // 主责任/副责任
   
   // 原文和解析结果
   clauseText          String    @db.Text // 原文片段
@@ -168,10 +173,15 @@ model InsuranceCoverageLibrary {
   verified            Boolean   @default(false) // 是否已人工审核（保留兼容）
   
   // 审核信息（新）
-  reviewStatus        String    @default("pending") // pending/approved/rejected
+  reviewStatus        String    @default("pending") // pending/approved/rejected（用户的审批结果）
   reviewNotes         String?   @db.Text // 审核备注
   reviewedBy          String?   // 审核人
   reviewedAt          DateTime? // 审核时间
+  
+  // AI修改状态（新增）
+  aiModified          Boolean   @default(false) // AI是否修改过此记录
+  aiModifiedAt        DateTime? // AI修改时间
+  aiModificationNote  String?   @db.Text // AI修改说明
   
   // 旧字段（保留兼容）
   verifiedBy          String?

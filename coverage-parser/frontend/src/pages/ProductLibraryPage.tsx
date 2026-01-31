@@ -3,7 +3,6 @@ import {
   Table, 
   Card, 
   Input, 
-  Select, 
   Button, 
   Tag, 
   Space, 
@@ -12,8 +11,7 @@ import {
   Col,
   Modal,
   Upload,
-  Tooltip,
-  AutoComplete
+  Tooltip
 } from 'antd'
 import {
   SearchOutlined,
@@ -26,8 +24,6 @@ import {
 import type { ColumnsType } from 'antd/es/table'
 import type { UploadProps } from 'antd'
 import { getProducts, exportProducts, importProducts } from '../services/api'
-
-const { Option } = Select
 
 // 产品数据类型
 interface ProductItem {
@@ -97,64 +93,54 @@ export default function ProductLibraryPage() {
   const [selectedItem, setSelectedItem] = useState<ProductItem | null>(null)
   const [detailVisible, setDetailVisible] = useState(false)
   
-  // 统计数据
+  // 排序状态
+  const [sortInfo, setSortInfo] = useState<{ field: string; order: 'ascend' | 'descend' | null }>({
+    field: '',
+    order: null
+  })
+  
+  // 统计数据（总数，不受筛选影响）
   const [stats, setStats] = useState({
-    total: 1,
+    total: 0,
     byCategory: {
-      疾病险: 1,
+      疾病险: 0,
       人寿险: 0,
       意外险: 0,
       年金险: 0
     }
   })
   
-  // 保险产品ID号列表（用于下拉选择）
-  const [policyIdOptions, setPolicyIdOptions] = useState<string[]>([])
-
-  // 加载所有保险产品ID号
-  const loadPolicyIds = async () => {
-    try {
-      console.log('🔄 开始加载保险产品ID号列表...')
-      // 获取所有产品（不分页，只取ID号）
-      const response = await getProducts({
-        page: 1,
-        pageSize: 10000 // 获取所有
-      })
-      
-      console.log('📡 获取产品响应:', response)
-      
-      if (response.success && response.data) {
-        // 提取所有不重复的ID号
-        const ids = Array.from(new Set(
-          response.data
-            .map((item: any) => item.policyId || item.保险产品ID号)
-            .filter((id: string) => id && id.trim())
-        )) as string[]
-        
-        setPolicyIdOptions(ids.sort())
-        console.log('✅ 加载保险产品ID号列表成功:', ids.length, '个')
-        console.log('📋 前5个ID示例:', ids.slice(0, 5))
-      } else {
-        console.warn('⚠️ 响应数据格式异常:', response)
-      }
-    } catch (error) {
-      console.error('❌ 加载保险产品ID号失败:', error)
-    }
-  }
+  // 筛选后的数量
+  const [filteredTotal, setFilteredTotal] = useState(0)
+  
 
   // 加载数据
   const loadData = async () => {
     try {
       setLoading(true)
-      console.log('🔍 加载保险产品库数据...')
       
-      const response = await getProducts({
+      // 构建请求参数，只包含非空的筛选条件
+      const params: any = {
         page: pagination.current,
-        pageSize: pagination.pageSize,
-        ...filters
+        pageSize: pagination.pageSize
+      }
+      
+      // 只添加有值的筛选条件
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value && value !== '') {
+          params[key] = value
+        }
       })
       
-      console.log('✅ 获取到数据:', response)
+      // 添加排序参数
+      if (sortInfo.field && sortInfo.order) {
+        params.sortField = sortInfo.field
+        params.sortOrder = sortInfo.order === 'ascend' ? 'asc' : 'desc'
+      }
+      
+      
+      const response = await getProducts(params)
+      
       
       // 转换数据格式
       const transformedData = response.data.map((item: any, index: number) => ({
@@ -176,19 +162,8 @@ export default function ProductLibraryPage() {
       
       setData(transformedData)
       setTotal(response.total || 0)
+      setFilteredTotal(response.total || 0) // 筛选后的数量
       
-      // 更新统计数据
-      setStats({
-        total: response.total || 0,
-        byCategory: {
-          疾病险: response.byCategory?.疾病险 || 0,
-          人寿险: response.byCategory?.人寿险 || 0,
-          意外险: response.byCategory?.意外险 || 0,
-          年金险: response.byCategory?.年金险 || 0
-        }
-      })
-      
-      console.log('✅ 数据加载完成，共', response.total, '条')
     } catch (error: any) {
       console.error('❌ 加载数据失败:', error)
       message.error(`加载数据失败: ${error.message}`)
@@ -197,26 +172,40 @@ export default function ProductLibraryPage() {
     }
   }
 
-  // 首次加载保险产品ID号列表（只运行一次）
+  // 加载总数统计（不受筛选影响）
+  const loadStats = async () => {
+    try {
+      const response = await getProducts({
+        page: 1,
+        pageSize: 1 // 只需要获取统计数据
+      })
+      
+      if (response) {
+        setStats({
+          total: response.total || 0,
+          byCategory: {
+            疾病险: response.byCategory?.疾病险 || 0,
+            人寿险: response.byCategory?.人寿险 || 0,
+            意外险: response.byCategory?.意外险 || 0,
+            年金险: response.byCategory?.年金险 || 0
+          }
+        })
+      }
+    } catch (error) {
+      console.error('❌ 加载总数统计失败:', error)
+    }
+  }
+
+  // 首次加载总数统计（只运行一次）
   useEffect(() => {
-    console.log('🚀 ProductLibraryPage 首次挂载，加载ID列表')
-    loadPolicyIds()
+    loadStats()
   }, [])
 
-  // 初始化加载
+  // 数据加载 - 监听分页、筛选、排序变化
   useEffect(() => {
-    console.log('🔄 页码变化，重新加载数据')
     loadData()
-  }, [pagination.current, pagination.pageSize])
-
-  // 筛选变化时重新加载
-  useEffect(() => {
-    if (pagination.current === 1) {
-      loadData()
-    } else {
-      setPagination({ ...pagination, current: 1 })
-    }
-  }, [filters])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagination.current, pagination.pageSize, JSON.stringify(filters), sortInfo.field, sortInfo.order])
 
   // 表格列定义
   const columns: ColumnsType<ProductItem> = [
@@ -225,7 +214,8 @@ export default function ProductLibraryPage() {
       dataIndex: '序号',
       key: '序号',
       width: 80,
-      sorter: true
+      sorter: true, // 启用后端排序（按ID排序）
+      sortOrder: sortInfo.field === '序号' ? sortInfo.order : null
     },
     {
       title: '保险产品ID号',
@@ -235,23 +225,12 @@ export default function ProductLibraryPage() {
       ellipsis: true,
       filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
         <div style={{ padding: 8 }}>
-          <Select
-            showSearch
-            placeholder="搜索或选择产品ID号"
+          <Input
+            placeholder="输入产品ID号进行搜索"
             value={selectedKeys[0]}
-            onChange={(value) => {
-              setSelectedKeys(value ? [value] : [])
-            }}
-            onSelect={() => {
-              setTimeout(() => confirm(), 100)
-            }}
-            filterOption={(input, option) =>
-              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-            }
-            allowClear
-            style={{ width: 280, marginBottom: 8, display: 'block' }}
-            options={policyIdOptions.map(id => ({ value: id, label: id }))}
-            dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
+            onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+            onPressEnter={() => confirm()}
+            style={{ width: 220, marginBottom: 8, display: 'block' }}
           />
           <Space>
             <Button
@@ -259,7 +238,7 @@ export default function ProductLibraryPage() {
               onClick={() => confirm()}
               icon={<SearchOutlined />}
               size="small"
-              style={{ width: 130 }}
+              style={{ width: 105 }}
             >
               搜索
             </Button>
@@ -269,18 +248,14 @@ export default function ProductLibraryPage() {
                 confirm()
               }}
               size="small"
-              style={{ width: 130 }}
+              style={{ width: 105 }}
             >
               重置
             </Button>
           </Space>
         </div>
       ),
-      filteredValue: filters.保险产品ID号 ? [filters.保险产品ID号] : null,
-      onFilter: (value: any, record: ProductItem) => {
-        const id = record.保险产品ID号 || ''
-        return id.toLowerCase().includes(value.toLowerCase())
-      }
+      filteredValue: filters.保险产品ID号 ? [filters.保险产品ID号] : null
     },
     {
       title: '公司名称',
@@ -288,11 +263,38 @@ export default function ProductLibraryPage() {
       key: '公司名称',
       width: 200,
       ellipsis: true,
-      filters: [
-        { text: '百年人寿保险股份有限公司', value: '百年人寿保险股份有限公司' },
-        { text: '合众人寿保险股份有限公司', value: '合众人寿保险股份有限公司' },
-        { text: '国任财产人寿保险股份有限公司', value: '国任财产人寿保险股份有限公司' }
-      ],
+      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }: any) => (
+        <div style={{ padding: 8 }}>
+          <Input
+            placeholder="输入公司名称进行搜索"
+            value={selectedKeys[0]}
+            onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
+            onPressEnter={() => confirm()}
+            style={{ width: 200, marginBottom: 8, display: 'block' }}
+          />
+          <Space>
+            <Button
+              type="primary"
+              onClick={() => confirm()}
+              icon={<SearchOutlined />}
+              size="small"
+              style={{ width: 95 }}
+            >
+              搜索
+            </Button>
+            <Button
+              onClick={() => {
+                clearFilters?.()
+                confirm()
+              }}
+              size="small"
+              style={{ width: 95 }}
+            >
+              重置
+            </Button>
+          </Space>
+        </div>
+      ),
       filteredValue: filters.公司名称 ? [filters.公司名称] : null
     },
     {
@@ -333,11 +335,8 @@ export default function ProductLibraryPage() {
           </Space>
         </div>
       ),
-      filteredValue: filters.保险产品名称 ? [filters.保险产品名称] : null,
-      onFilter: (value: any, record: ProductItem) => {
-        const name = record.保险产品名称 || ''
-        return name.toLowerCase().includes(value.toLowerCase())
-      }
+      filteredValue: filters.保险产品名称 ? [filters.保险产品名称] : null
+      // 不使用 onFilter，由后端筛选
     },
     {
       title: '保险大类',
@@ -420,10 +419,6 @@ export default function ProductLibraryPage() {
         </div>
       ),
       filteredValue: filters.保障期限 ? [filters.保障期限] : null,
-      onFilter: (value: any, record: ProductItem) => {
-        const period = record.保障期限 || ''
-        return period.toLowerCase().includes(value.toLowerCase())
-      },
       render: (text) => text || '-'
     },
     {
@@ -465,10 +460,6 @@ export default function ProductLibraryPage() {
         </div>
       ),
       filteredValue: filters.交费期限 ? [filters.交费期限] : null,
-      onFilter: (value: any, record: ProductItem) => {
-        const period = record.交费期限 || ''
-        return period.toLowerCase().includes(value.toLowerCase())
-      },
       render: (text) => text || '-'
     },
     {
@@ -496,7 +487,8 @@ export default function ProductLibraryPage() {
       dataIndex: '疾病责任数',
       key: '疾病责任数',
       width: 110,
-      sorter: true,
+      sorter: true, // 启用后端排序
+      sortOrder: sortInfo.field === '疾病责任数' ? sortInfo.order : null,
       render: (num) => <span style={{ color: num > 0 ? '#1890ff' : '#999' }}>{num}项</span>
     },
     {
@@ -504,7 +496,8 @@ export default function ProductLibraryPage() {
       dataIndex: '身故责任数',
       key: '身故责任数',
       width: 110,
-      sorter: true,
+      sorter: true, // 启用后端排序
+      sortOrder: sortInfo.field === '身故责任数' ? sortInfo.order : null,
       render: (num) => <span style={{ color: num > 0 ? '#1890ff' : '#999' }}>{num}项</span>
     },
     {
@@ -512,7 +505,8 @@ export default function ProductLibraryPage() {
       dataIndex: '意外责任数',
       key: '意外责任数',
       width: 110,
-      sorter: true,
+      sorter: true, // 启用后端排序
+      sortOrder: sortInfo.field === '意外责任数' ? sortInfo.order : null,
       render: (num) => <span style={{ color: num > 0 ? '#1890ff' : '#999' }}>{num}项</span>
     },
     {
@@ -520,7 +514,8 @@ export default function ProductLibraryPage() {
       dataIndex: '年金责任数',
       key: '年金责任数',
       width: 110,
-      sorter: true,
+      sorter: true, // 启用后端排序
+      sortOrder: sortInfo.field === '年金责任数' ? sortInfo.order : null,
       render: (num) => <span style={{ color: num > 0 ? '#1890ff' : '#999' }}>{num}项</span>
     },
     {
@@ -565,82 +560,46 @@ export default function ProductLibraryPage() {
   ]
 
   const handleTableChange = (newPagination: any, tableFilters: any, sorter: any) => {
-    console.log('📊 表格变化:', { newPagination, tableFilters, sorter })
+    // 构建新的筛选条件
+    const newFilters: any = {
+      保险产品ID号: '',
+      公司名称: '',
+      保险产品名称: '',
+      保险大类: '',
+      保险小类: '',
+      保障期限: '',
+      交费期限: '',
+      销售状态: '',
+      reviewStatus: ''
+    }
+    
+    // 从 tableFilters 中提取值
+    if (tableFilters) {
+      Object.keys(tableFilters).forEach(key => {
+        const value = tableFilters[key]
+        if (value && Array.isArray(value) && value.length > 0) {
+          newFilters[key] = value[0]
+        }
+      })
+    }
+    
+    // 处理排序 - 传给后端
+    let sortField = ''
+    let sortOrder: 'ascend' | 'descend' | null = null
+    if (sorter && sorter.field && sorter.order) {
+      sortField = sorter.field
+      sortOrder = sorter.order
+    }
+    
+    // 更新状态
+    setFilters(newFilters)
+    setSortInfo({ field: sortField, order: sortOrder })
     
     // 更新分页
     setPagination({
       current: newPagination.current,
       pageSize: newPagination.pageSize
     })
-    
-    // 构建新的筛选条件
-    const newFilters: any = { ...filters }
-    
-    // 保险产品ID号筛选
-    if (tableFilters['保险产品ID号'] && tableFilters['保险产品ID号'].length > 0) {
-      newFilters.保险产品ID号 = tableFilters['保险产品ID号'][0]
-    } else {
-      newFilters.保险产品ID号 = ''
-    }
-    
-    // 保险公司筛选（从表头输入框）
-    if (tableFilters['公司名称'] && tableFilters['公司名称'].length > 0) {
-      newFilters.公司名称 = tableFilters['公司名称'][0]
-    } else {
-      newFilters.公司名称 = ''
-    }
-    
-    // 保险产品名称筛选（从表头输入框）
-    if (tableFilters['保险产品名称'] && tableFilters['保险产品名称'].length > 0) {
-      newFilters.保险产品名称 = tableFilters['保险产品名称'][0]
-    } else {
-      newFilters.保险产品名称 = ''
-    }
-    
-    // 保险大类筛选
-    if (tableFilters['保险大类'] && tableFilters['保险大类'].length > 0) {
-      newFilters.保险大类 = tableFilters['保险大类'][0]
-    } else {
-      newFilters.保险大类 = ''
-    }
-    
-    // 保险小类筛选
-    if (tableFilters['保险小类'] && tableFilters['保险小类'].length > 0) {
-      newFilters.保险小类 = tableFilters['保险小类'][0]
-    } else {
-      newFilters.保险小类 = ''
-    }
-    
-    // 保障期限筛选
-    if (tableFilters['保障期限'] && tableFilters['保障期限'].length > 0) {
-      newFilters.保障期限 = tableFilters['保障期限'][0]
-    } else {
-      newFilters.保障期限 = ''
-    }
-    
-    // 交费期限筛选
-    if (tableFilters['交费期限'] && tableFilters['交费期限'].length > 0) {
-      newFilters.交费期限 = tableFilters['交费期限'][0]
-    } else {
-      newFilters.交费期限 = ''
-    }
-    
-    // 销售状态筛选
-    if (tableFilters['销售状态'] && tableFilters['销售状态'].length > 0) {
-      newFilters.销售状态 = tableFilters['销售状态'][0]
-    } else {
-      newFilters.销售状态 = ''
-    }
-    
-    // 审批结果筛选
-    if (tableFilters['reviewStatus'] && tableFilters['reviewStatus'].length > 0) {
-      newFilters.reviewStatus = tableFilters['reviewStatus'][0]
-    } else {
-      newFilters.reviewStatus = ''
-    }
-    
-    console.log('🔍 新筛选条件:', newFilters)
-    setFilters(newFilters)
   }
 
   const handleExport = async () => {
@@ -1027,9 +986,14 @@ export default function ProductLibraryPage() {
           }}>
             筛选结果：<span style={{ 
               fontWeight: 600, 
-              color: total === 0 ? '#999' : '#01BCD6',
+              color: filteredTotal === 0 ? '#999' : '#01BCD6',
               fontSize: '16px'
-            }}>{total}</span> 条
+            }}>{filteredTotal}</span> 条
+            {filteredTotal !== stats.total && (
+              <span style={{ marginLeft: '12px', color: '#999', fontSize: '12px' }}>
+                （共 {stats.total} 条）
+              </span>
+            )}
           </div>
           
           <Table

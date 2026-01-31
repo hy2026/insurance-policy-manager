@@ -6,7 +6,6 @@ import type { Policy } from '@/types'
 import type { FamilyMember } from '@/services/api'
 import PolicyDetailCard from '@/components/PolicyDetailCard'
 
-console.log('💎💎💎 版本 13.0 - 添加保单详情展开 💎💎💎')
 
 // 根据性别动态生成婚育状态选项（参照zhichu1）
 const getMaritalStatusOptions = (gender: string) => [
@@ -714,12 +713,15 @@ export default function PolicyManagerHomePage() {
           </div>
         )}
 
-          {/* 保单卡片列表 */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+          {/* 保单卡片列表 - 固定3列，卡片随页面变大 */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(280px, 1fr))', gap: '24px' }}>
             {displayPolicies.map(policy => {
               const endYear = policy.coverageEndYear || policy.policyInfo?.coverageEndYear
               const isActive = !endYear || endYear === '终身' || endYear === 'lifetime' || parseInt(String(endYear)) >= currentYear
               const isExpanded = String(expandedPolicyId) === String(policy.id)
+              
+              // 判断是否应该淡化：有卡片展开 && 当前卡片不是展开的卡片
+              const shouldDim = expandedPolicyId !== null && !isExpanded
               
               return (
               <div
@@ -732,10 +734,27 @@ export default function PolicyManagerHomePage() {
                   padding: '16px', 
                   border: '1px solid #f3f4f6', 
                   boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)', 
-                  transition: 'all 0.3s'
+                  transition: 'all 0.3s',
+                  zIndex: isExpanded ? 1000 : 1,  // 展开时提高z-index
+                  // 方案B：淡化+模糊效果
+                  opacity: shouldDim ? 0.2 : 1,
+                  filter: shouldDim ? 'blur(2px)' : 'none',
+                  pointerEvents: shouldDim ? 'none' : 'auto'
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#01BCD6'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.2)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e0e0e0'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}
+                onMouseEnter={(e) => { 
+                  if (!shouldDim) {
+                    e.currentTarget.style.borderColor = '#01BCD6'
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(1, 188, 214, 0.2)'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                  }
+                }}
+                onMouseLeave={(e) => { 
+                  if (!shouldDim) {
+                    e.currentTarget.style.borderColor = '#e0e0e0'
+                    e.currentTarget.style.boxShadow = 'none'
+                    e.currentTarget.style.transform = 'translateY(0)'
+                  }
+                }}
               >
                 <div style={{ position: 'absolute', top: '-20px', left: '-20px', width: '55px', height: '55px', borderRadius: '50%', background: isActive ? 'rgba(22, 163, 74, 0.1)' : 'rgba(220, 38, 38, 0.1)', backdropFilter: 'blur(12px)', border: `0.5px solid ${isActive ? '#16a34a' : '#dc2626'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: isActive ? '#16a34a' : '#dc2626', fontSize: '15px', fontWeight: 800, boxShadow: '0 6px 16px rgba(0, 0, 0, 0.25)', zIndex: 10, transform: 'rotate(-15deg)' }}>
                   {isActive ? '有效' : '失效'}
@@ -745,7 +764,7 @@ export default function PolicyManagerHomePage() {
                     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{policy.productName}</h3>
-                        <span style={{ background: '#f0f8fc', color: '#01BCD6', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>{POLICY_TYPE_MAP[policy.policyType] || policy.policyType}</span>
+                        <span style={{ background: '#f0f8fc', color: '#01BCD6', padding: '4px 12px', borderRadius: '12px', fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>{policy.productSubCategory || POLICY_TYPE_MAP[policy.policyType] || policy.policyType}</span>
                       </div>
                       {policy.policyIdNumber && (
                         <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -767,8 +786,19 @@ export default function PolicyManagerHomePage() {
                   <div><strong>保险公司：</strong>{policy.insuranceCompany}</div>
                   <div><strong>被保险人：</strong>{policy.insuredPerson} ({policy.birthYear || policy.policyInfo?.birthYear}年出生)</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
-                    <div><strong>投保开始：</strong>{policy.policyStartYear || policy.policyInfo?.policyStartYear}年</div>
-                    <div><strong>保障结束：</strong>{(() => { const cey = policy.coverageEndYear ?? policy.policyInfo?.coverageEndYear; if (!cey || cey === 'lifetime') return '终身'; return `${cey}年` })()}</div>
+                    <div><strong>投保开始：</strong>{(() => {
+                      const startYear = policy.policyStartYear || policy.policyInfo?.policyStartYear
+                      const birthYear = policy.birthYear || policy.policyInfo?.birthYear
+                      const startAge = startYear && birthYear ? startYear - birthYear : null
+                      return startYear ? `${startYear}年${startAge !== null ? `（${startAge}岁）` : ''}` : '未填写'
+                    })()}</div>
+                    <div><strong>保障结束：</strong>{(() => {
+                      const cey = policy.coverageEndYear ?? policy.policyInfo?.coverageEndYear
+                      const birthYear = policy.birthYear || policy.policyInfo?.birthYear
+                      if (!cey || cey === 'lifetime' || cey === '终身') return '终身'
+                      const endAge = birthYear ? parseInt(String(cey)) - birthYear : null
+                      return `${cey}年${endAge !== null ? `（${endAge}岁）` : ''}`
+                    })()}</div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px' }}>
                     <div><strong>交费年限：</strong>{policy.paymentPeriod || policy.totalPaymentPeriod || '未填写'}年</div>
@@ -840,7 +870,7 @@ export default function PolicyManagerHomePage() {
                   </button>
                 </div>
                 
-                {/* 详情展开区域 - 绝对定位浮层，智能判断左右展开方向 */}
+{/* 详情展开区域 - 绝对定位浮层，提高z-index确保在其他卡片上方 */}
                 {expandedPolicyId !== null && String(expandedPolicyId) === String(policy.id) && (
                   <div 
                     ref={(el) => {
@@ -871,9 +901,8 @@ export default function PolicyManagerHomePage() {
                       borderRadius: '12px',
                       background: 'linear-gradient(135deg, #f0f9fc 0%, #e8f4f8 100%)',
                       border: '2px solid #01BCD6',
-                      overflow: 'hidden',
                       boxShadow: '0 12px 40px rgba(1, 188, 214, 0.25)',
-                      zIndex: 1000
+                      zIndex: 9999
                     }}
                   >
                     {/* 详情头部 */}
@@ -887,7 +916,7 @@ export default function PolicyManagerHomePage() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span style={{ fontSize: '16px' }}>📋</span>
                         <span style={{ fontSize: '15px', fontWeight: 600, color: '#fff' }}>
-                          {policy.productName} - {POLICY_TYPE_MAP[policy.policyType] || policy.policyType}
+                          {policy.productName} - {policy.productSubCategory || POLICY_TYPE_MAP[policy.policyType] || policy.policyType}
                         </span>
                       </div>
                       <button

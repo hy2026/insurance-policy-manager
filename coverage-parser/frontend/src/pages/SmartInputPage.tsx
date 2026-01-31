@@ -26,6 +26,69 @@ const COVERAGE_TYPES = [
 const ENTITY_OPTIONS = ['本人', '配偶', '孩子', '父亲', '母亲']
 const PAYMENT_PERIODS = ['1', '3', '5', '10', '15', '20', '30', 'lifetime']
 
+// 🔑 责任排序函数：先主责任后副责任，然后按责任小类排序，最后按次数排序
+function sortCoverages(coverages: any[]): { coverage: any; originalIndex: number }[] {
+  // 责任小类排序优先级
+  const categoryOrder: Record<string, number> = {
+    '重疾责任': 1,
+    '中症责任': 2,
+    '轻症责任': 3,
+    '前症责任': 4,
+    '特定疾病责任': 5,
+    '身故责任': 6,
+    '意外责任': 7,
+    '年金责任': 8,
+    '豁免责任': 9,
+    '其他': 10
+  }
+  
+  // 从责任名称中提取次数（首次/第一次/第二次...）
+  function extractPayoutOrder(name: string): number {
+    if (/首次|第一次|第1次/.test(name)) return 1
+    if (/第二次|第2次/.test(name)) return 2
+    if (/第三次|第3次/.test(name)) return 3
+    if (/第四次|第4次/.test(name)) return 4
+    if (/第五次|第5次/.test(name)) return 5
+    if (/第六次|第6次/.test(name)) return 6
+    if (/第七次|第7次/.test(name)) return 7
+    if (/第八次|第8次/.test(name)) return 8
+    if (/第九次|第9次/.test(name)) return 9
+    if (/第十次|第10次/.test(name)) return 10
+    return 0 // 没有次数标识的排在最前面
+  }
+  
+  // 创建带原始索引的数组
+  const withIndex = coverages.map((coverage, originalIndex) => ({ coverage, originalIndex }))
+  
+  // 排序
+  return withIndex.sort((a, b) => {
+    const coverageA = a.coverage
+    const coverageB = b.coverage
+    
+    // 1. 先按责任层级排序：主责任 > 副责任 > 无标记
+    const levelA = coverageA.责任层级 || coverageA.parseResult?.责任层级 || ''
+    const levelB = coverageB.责任层级 || coverageB.parseResult?.责任层级 || ''
+    const levelOrderA = levelA === '主责任' ? 0 : levelA === '副责任' ? 1 : 2
+    const levelOrderB = levelB === '主责任' ? 0 : levelB === '副责任' ? 1 : 2
+    if (levelOrderA !== levelOrderB) return levelOrderA - levelOrderB
+    
+    // 2. 在同一层级内，按责任小类排序
+    const categoryA = coverageA.责任小类 || coverageA.parseResult?.责任小类 || detectCoverageCategory(coverageA.name)
+    const categoryB = coverageB.责任小类 || coverageB.parseResult?.责任小类 || detectCoverageCategory(coverageB.name)
+    const categoryOrderA = categoryOrder[categoryA] || 10
+    const categoryOrderB = categoryOrder[categoryB] || 10
+    if (categoryOrderA !== categoryOrderB) return categoryOrderA - categoryOrderB
+    
+    // 3. 在同一小类内，按次数排序
+    const payoutOrderA = extractPayoutOrder(coverageA.name)
+    const payoutOrderB = extractPayoutOrder(coverageB.name)
+    if (payoutOrderA !== payoutOrderB) return payoutOrderA - payoutOrderB
+    
+    // 4. 最后按名称排序
+    return coverageA.name.localeCompare(coverageB.name, 'zh-CN')
+  })
+}
+
 // 责任类型识别映射
 function detectCoverageCategory(name: string): '重疾责任' | '中症责任' | '轻症责任' | '特定疾病责任' | '其他' {
   const nameLower = name.toLowerCase().replace(/\s+/g, '')
@@ -272,9 +335,18 @@ function TierDisplay({
   // 判断是否是公式类型（有keyAmounts就是公式类型）
   const isFormula = !!(tier.keyAmounts && tier.keyAmounts.length > 0)
   
-  // 获取保障年龄：优先使用tier.startAge/endAge，如果没有则从keyAmounts中获取
+  // 🔑 计算当前保障结束年龄（根据 policyInfo）
+  const currentCoverageEndAge = policyInfo.coverageEndYear === 'lifetime' || policyInfo.coverageEndYear === '终身'
+    ? 100 
+    : (typeof policyInfo.coverageEndYear === 'number' 
+        ? policyInfo.coverageEndYear - policyInfo.birthYear 
+        : parseInt(String(policyInfo.coverageEndYear)) - policyInfo.birthYear)
+  
+  // 获取保障年龄：
+  // - startAge：优先使用tier.startAge，如果没有则从keyAmounts中获取
+  // - endAge：🔑 总是使用当前保障结束年龄（确保与左边保持同步）
   const startAge = tier.startAge ?? tier.keyAmounts?.[0]?.age
-  const endAge = tier.endAge ?? tier.keyAmounts?.[tier.keyAmounts?.length - 1]?.age
+  const endAge = currentCoverageEndAge // 🔑 不再从 tier.endAge 读取，直接使用计算值
   
   // 更新阶段信息的辅助函数
   const updateTier = (updates: any) => {
@@ -309,9 +381,22 @@ function TierDisplay({
     // 在前端本地重新计算每年的金额
     const newKeyAmounts: any[] = []
     
-    // 获取当前的开始和结束年龄（从 tier 对象中读取，而不是使用默认值）
-    const currentStartAge = tier.startAge != null ? parseInt(tier.startAge.toString()) : startAge
-    const currentEndAge = tier.endAge != null ? parseInt(tier.endAge.toString()) : endAge
+    // 🔑 计算新的保障结束年龄（根据最新的 policyInfo）
+    const newCoverageEndAge = policyInfo.coverageEndYear === 'lifetime' || policyInfo.coverageEndYear === '终身'
+      ? 100 
+      : (typeof policyInfo.coverageEndYear === 'number' 
+          ? policyInfo.coverageEndYear - policyInfo.birthYear 
+          : parseInt(policyInfo.coverageEndYear) - policyInfo.birthYear)
+    
+    const policyStartAge = policyInfo.policyStartYear - policyInfo.birthYear
+    
+    // 🔑 起始年龄：使用投保年龄
+    const currentStartAge = tier.startAge != null ? parseInt(tier.startAge.toString()) : policyStartAge
+    
+    // 🔑 结束年龄：总是使用新的保障结束年龄
+    const currentEndAge = newCoverageEndAge
+    
+    console.log(`[TierDisplay重新计算] 原endAge=${tier.endAge}, 新endAge=${currentEndAge}`)
     
     // 验证年龄有效性
     if (!currentStartAge || !currentEndAge || currentStartAge > currentEndAge) {
@@ -324,9 +409,6 @@ function TierDisplay({
     const interestRate = parseFloat(tier.interestRate?.toString() || '0') / 100
     const basicSumInsured = policyInfo.basicSumInsured
     const basicSumInsuredWan = basicSumInsured / 10000
-    
-    // 根据公式类型计算
-    const policyStartAge = policyInfo.policyStartYear - policyInfo.birthYear
     
     for (let age = currentStartAge; age <= currentEndAge; age++) {
       const year = policyInfo.birthYear + age
@@ -370,11 +452,19 @@ function TierDisplay({
       })
     }
     
-    // 只更新 keyAmounts，不修改 startAge 和 endAge（这些由输入框控制）
+    // 🔑 更新 keyAmounts 和 年龄范围
     const updatedTier = {
       ...tier,
+      startAge: currentStartAge,
+      endAge: currentEndAge,
       keyAmounts: newKeyAmounts
     }
+    
+    console.log(`[TierDisplay重新计算] 更新后的阶段:`, {
+      startAge: currentStartAge,
+      endAge: currentEndAge,
+      keyAmountsCount: newKeyAmounts.length
+    })
     
     setNeedsRecalculation(false)
     
@@ -382,7 +472,7 @@ function TierDisplay({
       onUpdate(index, updatedTier)
     }
     
-    message.success('重新计算完成！')
+    message.success(`重新计算完成！年龄范围: ${currentStartAge}～${currentEndAge >= 100 ? '终身' : currentEndAge + '岁'}`)
   }
   
   // 获取公式显示文本
@@ -1390,28 +1480,56 @@ export default function SmartInputPage() {
     console.log(`[calculateKeyAmounts] policyInfo.basicSumInsured (元) = ${policyInfo.basicSumInsured}`)
     console.log(`[calculateKeyAmounts] basicSumInsuredWan (万) = ${basicSumInsuredWan}`)
     
+    // 🔑 计算新的保障结束年龄（根据用户输入的保障结束年份）
+    const newCoverageEndAge = policyInfo.coverageEndYear === 'lifetime' 
+      ? 100 
+      : policyInfo.coverageEndYear - policyInfo.birthYear
+    
+    console.log(`[calculateKeyAmounts] 新的保障结束年龄: ${newCoverageEndAge}岁`)
+    
     // 遍历所有阶段，重新计算 keyAmounts
     const recalculatedTiers = tiers.map((tier: any, tierIndex: number) => {
-      // 🔑 对于责任库格式，需要推算年龄范围
-      let actualStartAge = tier.startAge ?? tier.keyAmounts?.[0]?.age
-      let actualEndAge = tier.endAge ?? tier.keyAmounts?.[tier.keyAmounts?.length - 1]?.age
+      // 🔑 起始年龄：优先使用阶段定义的，否则使用投保年龄
+      let actualStartAge = tier.startAge ?? tier.keyAmounts?.[0]?.age ?? policyStartAge
       
-      // 如果没有年龄信息，使用投保年龄到保障结束年龄
-      if (!actualStartAge) {
-        actualStartAge = policyStartAge
-      }
-      if (!actualEndAge) {
-        actualEndAge = policyInfo.coverageEndYear === 'lifetime' ? 100 : policyInfo.coverageEndYear - policyInfo.birthYear
-      }
+      // 🔑 结束年龄：总是使用新的保障结束年龄
+      // 不再尝试判断是否是"阶段性限制"，因为容易误判
+      // 如果用户确实有阶段性限制（如某阶段到60岁），可以手动在编辑面板中调整
+      let actualEndAge = newCoverageEndAge
       
-      // 如果没有公式，跳过
-      if (!tier.formula) {
-        console.log(`[计算金额] 阶段${tierIndex + 1}: 跳过（缺少公式）`)
-        return tier
-      }
+      console.log(`[calculateKeyAmounts] 阶段${tierIndex + 1}: 原endAge=${tier.endAge}, 新endAge=${actualEndAge}`)
       
       const currentStartAge = parseInt(actualStartAge.toString())
       const currentEndAge = parseInt(actualEndAge.toString())
+      
+      // 如果没有公式，仍然更新年龄范围
+      if (!tier.formula) {
+        console.log(`[计算金额] 阶段${tierIndex + 1}: 无公式，仅更新年龄范围 ${currentStartAge}-${currentEndAge}岁`)
+        // 更新 keyAmounts 中的年龄范围
+        if (tier.keyAmounts && tier.keyAmounts.length > 0) {
+          const templateAmount = tier.keyAmounts[0]?.amount || 0
+          const newKeyAmounts = []
+          for (let age = currentStartAge; age <= currentEndAge; age++) {
+            newKeyAmounts.push({
+              year: policyInfo.birthYear + age,
+              age,
+              amount: templateAmount
+            })
+          }
+          return {
+            ...tier,
+            startAge: currentStartAge,
+            endAge: currentEndAge,
+            keyAmounts: newKeyAmounts
+          }
+        }
+        return {
+          ...tier,
+          startAge: currentStartAge,
+          endAge: currentEndAge
+        }
+      }
+      
       const formula = tier.formula || ''
       const formulaType = tier.formulaType || 'fixed'
       const interestRate = parseFloat(tier.interestRate?.toString() || '0') / 100
@@ -1566,28 +1684,49 @@ export default function SmartInputPage() {
     // 获取保单信息
     const policyInfo = getPolicyInfo()
     console.log('[手动计算] 保单信息:', policyInfo)
+    console.log('[手动计算] coverageEndYear =', coverageEndYear, '-> policyInfo.coverageEndYear =', policyInfo.coverageEndYear)
     
-    // 计算所有来自库的责任
-    const hasLibraryCoverages = coverages.some(c => c.source === 'library')
-    if (!hasLibraryCoverages) {
+    // 🔑 计算所有有解析结果的责任（不限于 library）
+    const hasCalculableCoverages = coverages.some(c => c.parseResult || c.result)
+    if (!hasCalculableCoverages) {
       message.warning('当前没有需要计算的责任')
       return
     }
     
     console.log('[手动计算] 开始计算，当前责任数：', coverages.length)
+    console.log('[手动计算] editingIndex =', editingIndex)
     
     const recalculatedCoverages = coverages.map((c, index) => {
-      if (c.source === 'library' && c.parseResult) {
-        console.log(`[手动计算] 正在计算第${index + 1}个责任:`, c.name)
+      // 🔑 处理所有有解析结果的责任（不限于 source === 'library'）
+      if (c.parseResult) {
+        console.log(`[手动计算] 正在计算第${index + 1}个责任 (parseResult):`, c.name)
         const calculatedResult = calculateKeyAmounts(c.parseResult, policyInfo)
         console.log(`[手动计算] 第${index + 1}个责任计算完成`)
         return { ...c, parseResult: calculatedResult }
+      } else if (c.result) {
+        console.log(`[手动计算] 正在计算第${index + 1}个责任 (result):`, c.name)
+        const calculatedResult = calculateKeyAmounts(c.result, policyInfo)
+        console.log(`[手动计算] 第${index + 1}个责任计算完成`)
+        return { ...c, result: calculatedResult }
       }
       return c
     })
     
     console.log('[手动计算] 所有责任计算完成，准备更新状态')
     setCoverages(recalculatedCoverages)
+    
+    // 🔑 如果正在编辑某个责任，同步更新 parseResult
+    if (editingIndex !== null && editingIndex >= 0 && editingIndex < recalculatedCoverages.length) {
+      const editingCoverage = recalculatedCoverages[editingIndex]
+      if (editingCoverage.parseResult) {
+        console.log(`[手动计算] 同步更新正在编辑的责任 (index=${editingIndex}) 的 parseResult`)
+        setParseResult(editingCoverage.parseResult)
+      } else if (editingCoverage.result) {
+        console.log(`[手动计算] 同步更新正在编辑的责任 (index=${editingIndex}) 的 result`)
+        setParseResult(editingCoverage.result)
+      }
+    }
+    
     message.success('理赔金额计算完成！', 2)
   }
   
@@ -1676,6 +1815,8 @@ export default function SmartInputPage() {
             id: `lib-${c.id}`,
             name: c.coverageName || c.责任名称,
             type: c.coverageType || c.责任类型,
+            责任小类: c.责任小类 || parseResult?.责任小类 || '', // 🔑 保存责任小类用于排序
+            责任层级: c.责任层级 || parseResult?.责任层级 || '', // 🔑 保存责任层级用于排序
             source: 'library' as const,
             libraryId: c.id,
             isRequired: c.isRequired || c.是否必选 || '可选',
@@ -1877,32 +2018,31 @@ export default function SmartInputPage() {
         }
       }
       
-      // 🔄 如果基础信息已修改，使用统一的 calculateKeyAmounts 重新计算所有责任
-      if (policyInfoChanged || coverageEndYearChanged) {
-        message.loading({ content: '检测到保单信息已修改，正在重新计算所有责任...', key: 'recalc', duration: 0 })
-        console.log('[保存合同] 开始重新计算所有责任...')
-        
-        try {
-          // 🔑 复用统一的计算函数
-          finalCoverages = coverages.map((coverage, coverageIndex) => {
-            console.log(`[保存合同] 重新计算责任${coverageIndex + 1}: ${coverage.name}`)
-            
-            if (coverage.result) {
-              const calculatedResult = calculateKeyAmounts(coverage.result, currentPolicyInfo)
-              return { ...coverage, result: calculatedResult }
-            } else if (coverage.parseResult) {
-              const calculatedResult = calculateKeyAmounts(coverage.parseResult, currentPolicyInfo)
-              return { ...coverage, parseResult: calculatedResult }
-            }
-            return coverage
-          })
+      // 🔄 保存时始终重新计算所有责任（确保数据与当前保单信息一致）
+      // 无论用户是否点击了"重新计算"按钮，保存时都要确保责任的年龄范围和金额是基于最新的保单信息
+      message.loading({ content: '正在计算并保存...', key: 'recalc', duration: 0 })
+      console.log('[保存合同] 开始重新计算所有责任，当前保单信息:', currentPolicyInfo)
+      
+      try {
+        // 🔑 复用统一的计算函数，确保所有责任都使用最新的保单信息
+        finalCoverages = coverages.map((coverage, coverageIndex) => {
+          console.log(`[保存合同] 重新计算责任${coverageIndex + 1}: ${coverage.name}`)
           
-          message.success({ content: '重新计算完成', key: 'recalc', duration: 1 })
-        } catch (error: any) {
-          console.error('[保存合同] 重新计算失败:', error)
-          message.error({ content: '重新计算失败: ' + error.message, key: 'recalc' })
-          return
-        }
+          if (coverage.result) {
+            const calculatedResult = calculateKeyAmounts(coverage.result, currentPolicyInfo)
+            return { ...coverage, result: calculatedResult }
+          } else if (coverage.parseResult) {
+            const calculatedResult = calculateKeyAmounts(coverage.parseResult, currentPolicyInfo)
+            return { ...coverage, parseResult: calculatedResult }
+          }
+          return coverage
+        })
+        
+        message.destroy('recalc')
+      } catch (error: any) {
+        console.error('[保存合同] 重新计算失败:', error)
+        message.error({ content: '重新计算失败: ' + error.message, key: 'recalc' })
+        return
       }
       
       // 只保存已选中的责任
@@ -2416,7 +2556,9 @@ export default function SmartInputPage() {
                 </p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '12px' }}>
-                  {coverages.map((coverage, index) => {
+                  {/* 🔑 使用排序后的责任列表，保留原始索引用于编辑 */}
+                  {sortCoverages(coverages).map(({ coverage, originalIndex }) => {
+                    const index = originalIndex // 🔑 使用原始索引确保编辑功能正确
                     // 🔑 计算理赔金额范围（统一逻辑）
                     const payoutAmountDisplay = (() => {
                       const parseResult = coverage.parseResult || coverage.result
@@ -3045,39 +3187,39 @@ export default function SmartInputPage() {
                 </button>
                 
                 {/* 保存合同按钮 */}
-                <button
-                  className="complete-btn"
-                  onClick={handleComplete}
-                  disabled={coverages.length === 0}
-                  style={{ 
+              <button
+                className="complete-btn"
+                onClick={handleComplete}
+                disabled={coverages.length === 0}
+                style={{ 
                     flex: 1,
-                    backgroundColor: '#01BCD6',
-                    color: 'white',
-                    border: '2px solid #01BCD6',
-                    borderRadius: '8px',
-                    padding: '12px 32px',
-                    fontSize: '16px',
-                    fontWeight: '600',
-                    cursor: coverages.length === 0 ? 'not-allowed' : 'pointer',
-                    transition: 'all 0.3s'
-                  } as React.CSSProperties}
-                  onMouseEnter={(e) => {
-                    if (coverages.length > 0) {
-                      e.currentTarget.style.backgroundColor = '#00A3BD'
-                      e.currentTarget.style.transform = 'translateY(-2px)'
-                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(1, 188, 214, 0.4)'
-                      e.currentTarget.style.borderColor = '#01BCD6'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = '#01BCD6'
-                    e.currentTarget.style.transform = 'translateY(0)'
-                    e.currentTarget.style.boxShadow = 'none'
+                  backgroundColor: '#01BCD6',
+                  color: 'white',
+                  border: '2px solid #01BCD6',
+                  borderRadius: '8px',
+                  padding: '12px 32px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: coverages.length === 0 ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.3s'
+                } as React.CSSProperties}
+                onMouseEnter={(e) => {
+                  if (coverages.length > 0) {
+                    e.currentTarget.style.backgroundColor = '#00A3BD'
+                    e.currentTarget.style.transform = 'translateY(-2px)'
+                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(1, 188, 214, 0.4)'
                     e.currentTarget.style.borderColor = '#01BCD6'
-                  }}
-                >
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#01BCD6'
+                  e.currentTarget.style.transform = 'translateY(0)'
+                  e.currentTarget.style.boxShadow = 'none'
+                  e.currentTarget.style.borderColor = '#01BCD6'
+                }}
+              >
                   ✅ 保存合同
-                </button>
+              </button>
               </div>
             </div>
           </div>

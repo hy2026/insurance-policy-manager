@@ -1,6 +1,6 @@
 {
   "name": "coverage-parser-frontend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "保险解析助手 - React前端",
   "scripts": {

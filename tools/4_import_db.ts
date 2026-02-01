@@ -24,6 +24,7 @@ interface ImportOptions {
   file?: string;
   batch?: number;
   mode: 'replace' | 'append';  // replace: 清空后导入, append: 追加
+  fixReport?: string;  // 修复报告文件路径（可选）
 }
 
 async function loadJsonFile(filePath: string): Promise<any> {
@@ -68,9 +69,58 @@ async function clearLibrary() {
   }
 }
 
-async function importCases(cases: any[], mode: 'replace' | 'append') {
+async function loadFixReport(fixReportPath?: string): Promise<Map<number, any>> {
+  const fixMap = new Map<number, any>();
+  
+  if (!fixReportPath) {
+    return fixMap;
+  }
+  
+  try {
+    const fullPath = path.resolve(fixReportPath);
+    if (!fs.existsSync(fullPath)) {
+      console.warn(`⚠️ 修复报告文件不存在: ${fixReportPath}`);
+      return fixMap;
+    }
+    
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    const report = JSON.parse(content);
+    
+    console.log(`✅ 已加载修复报告: ${report.fixes_applied || 0} 个修复`);
+    
+    // 建立序号到修复信息的映射
+    if (report.fixes && Array.isArray(report.fixes)) {
+      for (const fix of report.fixes) {
+        if (fix.fix_applied && fix.issue && fix.issue.case_number) {
+          const caseNum = fix.issue.case_number;
+          if (!fixMap.has(caseNum)) {
+            fixMap.set(caseNum, []);
+          }
+          fixMap.get(caseNum).push({
+            type: fix.issue.type,
+            description: fix.fix_description,
+            severity: fix.issue.severity
+          });
+        }
+      }
+    }
+    
+    console.log(`   涉及 ${fixMap.size} 个案例的AI修改`);
+    
+  } catch (error: any) {
+    console.warn(`⚠️ 加载修复报告失败: ${error.message}`);
+  }
+  
+  return fixMap;
+}
+
+async function importCases(cases: any[], mode: 'replace' | 'append', fixMap: Map<number, any>) {
   console.log(`导入模式: ${mode === 'replace' ? '覆盖' : '追加'}`);
   console.log(`共 ${cases.length} 个案例`);
+  if (fixMap.size > 0) {
+    console.log(`AI修改标记: ${fixMap.size} 个案例`);
+  }
+  console.log();
   
   let successCount = 0;
   let failCount = 0;
@@ -100,13 +150,34 @@ async function importCases(cases: any[], mode: 'replace' | 'append') {
           });
         }
         
+        // 检查是否有AI修改
+        const caseNum = case_.序号;
+        const aiFixes = fixMap.get(caseNum);
+        const hasAIModification = aiFixes && aiFixes.length > 0;
+        
+        let aiModificationNote = '';
+        if (hasAIModification) {
+          // 生成AI修改说明
+          const fixDescriptions = aiFixes.map((f: any) => 
+            `[${f.severity}] ${f.type}: ${f.description}`
+          ).join('\n');
+          aiModificationNote = `AI自动修复了以下问题:\n${fixDescriptions}`;
+        }
+        
         // 插入责任记录
         await prisma.insuranceCoverageLibrary.create({
           data: {
             coverageName: case_.责任名称,
             clauseText: case_.责任原文 || '',
             parsedResult: case_,
-            productId: product.id
+            productId: product.id,
+            coverageType: case_.责任类型 || '其他',
+            // 设置AI修改标记
+            aiModified: hasAIModification,
+            aiModifiedAt: hasAIModification ? new Date() : null,
+            aiModificationNote: aiModificationNote || null,
+            // 设置审批状态为待审核
+            reviewStatus: 'pending'
           }
         });
         
@@ -155,20 +226,37 @@ async function importData(options: ImportOptions) {
     console.log(`✅ 已加载 ${cases.length} 个案例`);
     console.log();
     
-    // 3. 清空数据库（如果是replace模式）
+    // 3. 加载修复报告（如果提供）
+    let fixMap = new Map<number, any>();
+    if (options.fixReport) {
+      console.log(`加载修复报告: ${options.fixReport}`);
+      fixMap = await loadFixReport(options.fixReport);
+      console.log();
+    }
+    
+    // 4. 清空数据库（如果是replace模式）
     if (options.mode === 'replace') {
       await clearLibrary();
       console.log();
     }
     
-    // 4. 导入数据
-    const { successCount, failCount } = await importCases(cases, options.mode);
+    // 5. 导入数据
+    const { successCount, failCount } = await importCases(cases, options.mode, fixMap);
     
-    // 5. 验证
+    // 6. 验证
     console.log();
     console.log('验证导入结果...');
     const totalCount = await prisma.insuranceCoverageLibrary.count();
+    const aiModifiedCount = await prisma.insuranceCoverageLibrary.count({
+      where: { aiModified: true }
+    });
+    const pendingReviewCount = await prisma.insuranceCoverageLibrary.count({
+      where: { reviewStatus: 'pending' }
+    });
+    
     console.log(`数据库中共有 ${totalCount} 条记录`);
+    console.log(`  - AI修改: ${aiModifiedCount} 条`);
+    console.log(`  - 待审核: ${pendingReviewCount} 条`);
     
     console.log();
     console.log('='*80);
@@ -177,6 +265,14 @@ async function importData(options: ImportOptions) {
     console.log(`成功: ${successCount} 条`);
     console.log(`失败: ${failCount} 条`);
     console.log(`总计: ${totalCount} 条（数据库实际）`);
+    
+    if (aiModifiedCount > 0) {
+      console.log();
+      console.log('📝 下一步：在Web界面审批');
+      console.log('   1. 打开: http://localhost:5173/coverage-library');
+      console.log('   2. 筛选: AI修改=是, 审批状态=待审核');
+      console.log('   3. 逐条审批，填写审批结果和备注');
+    }
     
   } catch (error: any) {
     console.error('❌ 导入失败:', error.message);
@@ -210,6 +306,9 @@ function parseArgs(): ImportOptions {
       i++;
     } else if (arg === '--replace') {
       options.mode = 'replace';
+    } else if (arg === '--fix-report' && i + 1 < args.length) {
+      options.fixReport = args[i + 1];
+      i++;
     }
   }
   

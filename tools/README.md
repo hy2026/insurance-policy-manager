@@ -38,6 +38,33 @@ tools/
 
 ## 🛠️ 工具详解
 
+### 0️⃣ Excel原文提取工具
+
+**文件：** `excel_to_raw_text.py`
+
+**功能：**
+- 从Excel文件提取原文数据
+- 生成标准的 `原文条款-批次X.md`
+- 支持指定工作表和批次编号
+
+**使用方法：**
+
+```bash
+# 从Excel提取原文（自动推断批次编号）
+python excel_to_raw_text.py --input ../责任库导出-模版.xlsx --sheet 疾病责任
+
+# 明确指定批次编号
+python excel_to_raw_text.py --input ../责任库导出-模版.xlsx --sheet 疾病责任 --batch 16
+
+# 指定输出文件
+python excel_to_raw_text.py --input ../责任库导出-模版.xlsx --sheet 疾病责任 --output ../原文条款/原文条款-批次16.md
+```
+
+**输出：**
+- `原文条款/原文条款-批次X.md`
+
+---
+
 ### 1️⃣ 批次解析生成工具
 
 **文件：** `1_generate_batch.py`
@@ -211,13 +238,21 @@ from tools.utils.fixers import (
 
 ---
 
-## 🎯 实战示例：处理200条新数据
+## 🎯 实战示例：处理200条新数据（完整流程）
+
+### 步骤0：从Excel提取原文
+
+```bash
+cd tools
+python excel_to_raw_text.py --input ../责任库导出-模版.xlsx --sheet 疾病责任 --batch 16
+```
+
+输出：`原文条款/原文条款-批次16.md`
 
 ### 步骤1：生成解析模板
 
 ```bash
-cd tools
-python 1_generate_batch.py --batch 16 --start 3001 --end 3200
+python 1_generate_batch.py --batch 16
 ```
 
 输出：`解析结果/解析结果-批次16-序号3001-3200.json`（模板，需手动填写）
@@ -229,7 +264,6 @@ python 1_generate_batch.py --batch 16 --start 3001 --end 3200
 ### 步骤3：质量检查
 
 ```bash
-cd tools
 ts-node 2_check_quality.ts ../解析结果/解析结果-批次16-序号3001-3200.json
 ```
 
@@ -252,14 +286,30 @@ python 3_ai_reviewer.py --input ../解析结果/解析结果-批次16-序号3001
 python 3_ai_reviewer.py --input ../解析结果/解析结果-批次16-序号3001-3200.json --auto-fix
 ```
 
-### 步骤6：导入数据库
+### 步骤6：导入数据库（追加模式，带AI标记）
 
 ```bash
-cd tools
-ts-node 4_import_db.ts --batch 16 --mode append
+ts-node 4_import_db.ts --batch 16 --fix-report ../解析结果/解析结果-批次16-序号3001-3200_fix_report.json
 ```
 
-✅ 完成！
+输出：
+- 导入200条数据（追加到现有数据）
+- AI修改的记录自动标记 `aiModified=true`
+- 所有记录设置为 `reviewStatus=pending`
+
+### 步骤7：Web界面审批
+
+1. 打开浏览器访问：`http://localhost:5173/coverage-library`
+2. 筛选条件：
+   - AI修改 = 是
+   - 审批状态 = 待审核
+3. 点击"查看"按钮，打开详情弹窗
+4. 审批信息编辑：
+   - 选择审批结果：待审核/已通过/未通过
+   - 填写审批备注
+5. 点击"保存审批信息"
+
+✅ 完成！审批通过的数据可用于训练。
 
 ---
 

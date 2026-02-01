@@ -429,8 +429,13 @@ export default function CoverageLibraryPage() {
       // 调用后端导入API（增加超时时间）
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 600000) // 10分钟超时
+
+      // 生产环境下不要请求 Vercel 的 /api（通常不存在/不转发），而是直连 Railway 后端
+      const API_BASE_URL = import.meta.env.PROD
+        ? 'https://insurance-policy-manager-production.up.railway.app/api'
+        : '/api'
       
-      const response = await fetch('/api/coverage-library/import', {
+      const response = await fetch(`${API_BASE_URL}/coverage-library/import`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -447,7 +452,14 @@ export default function CoverageLibraryPage() {
       
       clearTimeout(timeoutId)
       
-      const result = await response.json()
+      // 兼容后端返回非JSON（例如 502/HTML），便于定位真实问题
+      const responseText = await response.text()
+      let result: any
+      try {
+        result = JSON.parse(responseText)
+      } catch {
+        throw new Error(`导入接口返回非JSON（HTTP ${response.status}）：${responseText.slice(0, 200)}`)
+      }
       
       message.destroy()
       
@@ -455,7 +467,7 @@ export default function CoverageLibraryPage() {
         message.success(`导入成功！共导入 ${result.data?.count || 0} 条数据`)
         loadData() // 重新加载数据
       } else {
-        message.error(`导入失败: ${result.message}`)
+        message.error(`导入失败(HTTP ${response.status}): ${result.message}`)
       }
     } catch (error: any) {
       message.destroy()

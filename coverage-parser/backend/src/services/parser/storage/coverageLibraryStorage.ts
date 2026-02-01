@@ -476,8 +476,19 @@ export class CoverageLibraryStorage {
    */
   async clearAll() {
     // 只清空责任库（产品库保留）
-    const deleteResult = await prisma.insuranceCoverageLibrary.deleteMany({});
-    console.log(`  ✅ 已删除 ${deleteResult.count} 条责任记录`);
+    // 说明：
+    // - deleteMany 不会重置自增ID，Railway UI 里看起来像“还是以前的序号”
+    // - TRUNCATE ... RESTART IDENTITY 会清空并重置自增序列，更符合“完全覆盖导入”的直觉
+    try {
+      await prisma.$executeRawUnsafe(
+        'TRUNCATE TABLE "insurance_coverage_library" RESTART IDENTITY;'
+      );
+      console.log(`  ✅ 已TRUNCATE并重置ID序列`);
+    } catch (e: any) {
+      console.warn(`  ⚠️ TRUNCATE失败，回退到deleteMany: ${e?.message || e}`);
+      const deleteResult = await prisma.insuranceCoverageLibrary.deleteMany({});
+      console.log(`  ✅ 已删除 ${deleteResult.count} 条责任记录`);
+    }
     
     // 验证是否真的清空了
     const remainingCount = await prisma.insuranceCoverageLibrary.count();

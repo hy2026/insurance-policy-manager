@@ -104,7 +104,11 @@ export default function PolicyManagerHomePage() {
   const needChildInfo = maritalStatus === 'single-with-child' || maritalStatus === 'married-with-child'
 
   useEffect(() => {
-    loadData()
+    // 延迟100ms加载数据，让页面先快速渲染，避免Safari超时
+    const timer = setTimeout(() => {
+      loadData()
+    }, 100)
+    return () => clearTimeout(timer)
   }, [])
 
   const loadData = async (retryCount = 0) => {

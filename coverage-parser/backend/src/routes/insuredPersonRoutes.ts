@@ -10,6 +10,29 @@ import prisma from '../prisma';
 const router = Router();
 
 /**
+ * 确保用户存在（避免 insured_persons.userId 外键失败）
+ */
+async function ensureUserExists(userId: number): Promise<number> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (user) return userId;
+
+  const anyUser = await prisma.user.findFirst({ orderBy: { id: 'asc' } });
+  if (anyUser) {
+    console.log(`警告：指定的 userId ${userId} 不存在，使用现有用户 id ${anyUser.id}`);
+    return anyUser.id;
+  }
+
+  const defaultUser = await prisma.user.create({
+    data: {
+      email: `user${userId}@default.com`,
+      name: '默认用户',
+    },
+  });
+  console.log(`创建了默认用户，id: ${defaultUser.id}`);
+  return defaultUser.id;
+}
+
+/**
  * GET /api/insured-persons
  * 获取用户的所有家庭成员
  */
@@ -68,9 +91,11 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    const validUserId = await ensureUserExists(Number(userId));
+
     // 检查是否已存在相同的家庭成员
     const existing = await prisma.insuredPerson.findFirst({
-      where: { userId, entity, birthYear }
+      where: { userId: validUserId, entity, birthYear }
     });
 
     if (existing) {
@@ -82,7 +107,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const newMember = await prisma.insuredPerson.create({
       data: {
-        userId,
+        userId: validUserId,
         entity,
         birthYear,
         gender,
@@ -333,6 +358,9 @@ router.post('/get-or-create', async (req: Request, res: Response) => {
         error: '缺少必填字段: userId, entity, birthYear',
       });
     }
+
+    // 确保用户存在，避免外键失败
+    personInfo.userId = await ensureUserExists(personInfo.userId);
 
     const result = await getOrCreateInsuredPerson(personInfo);
     res.json(result);

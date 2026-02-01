@@ -13,6 +13,30 @@ export interface PersonInfoInput {
   gender?: string;
 }
 
+/**
+ * 确保用户存在：前端默认使用 userId=1。
+ * 若数据库为空则创建一个默认用户，避免外键约束失败。
+ */
+async function ensureUserExists(userId: number): Promise<number> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (user) return userId;
+
+  const anyUser = await prisma.user.findFirst({ orderBy: { id: 'asc' } });
+  if (anyUser) {
+    console.log(`警告：指定的 userId ${userId} 不存在，使用现有用户 id ${anyUser.id}`);
+    return anyUser.id;
+  }
+
+  const defaultUser = await prisma.user.create({
+    data: {
+      email: `user${userId}@default.com`,
+      name: '默认用户',
+    },
+  });
+  console.log(`创建了默认用户，id: ${defaultUser.id}`);
+  return defaultUser.id;
+}
+
 export interface ConflictCheckResult {
   hasConflict: boolean;
   existingPerson?: {
@@ -120,10 +144,11 @@ export async function getOrCreateInsuredPerson(
   personInfo: PersonInfoInput
 ): Promise<{ id: number; isNew: boolean }> {
   const { userId, entity, birthYear, name, gender } = personInfo;
+  const validUserId = await ensureUserExists(userId);
 
   // 查找已有记录
   const existing = await prisma.insuredPerson.findFirst({
-    where: { userId, entity },
+    where: { userId: validUserId, entity },
   });
 
   if (existing) {
@@ -143,7 +168,7 @@ export async function getOrCreateInsuredPerson(
   // 创建新记录
   const newPerson = await prisma.insuredPerson.create({
     data: {
-      userId,
+      userId: validUserId,
       entity,
       birthYear,
       name,

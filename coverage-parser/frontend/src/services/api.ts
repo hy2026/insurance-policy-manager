@@ -9,9 +9,14 @@ import type {
   TrainingData,
 } from '@/types'
 
+// 根据环境决定API地址
+const API_BASE_URL = import.meta.env.PROD 
+  ? 'https://insurance-policy-manager-production.up.railway.app/api'  // 生产环境：Railway后端
+  : '/api';  // 开发环境：通过Vite代理转发到本地后端
+
 // 创建axios实例
 const api: AxiosInstance = axios.create({
-  baseURL: '/api', // 通过Vite代理转发到后端
+  baseURL: API_BASE_URL,
   timeout: 180000, // 3分钟超时（LLM调用可能需要较长时间）
   headers: {
     'Content-Type': 'application/json',
@@ -181,7 +186,11 @@ export async function importProducts(file: File): Promise<{ success: boolean; me
   const formData = new FormData()
   formData.append('file', file)
   
-  const response: any = await axios.post('/api/products/import', formData, {
+  const API_BASE_URL = import.meta.env.PROD 
+    ? 'https://insurance-policy-manager-production.up.railway.app/api'
+    : '/api';
+  
+  const response: any = await axios.post(`${API_BASE_URL}/products/import`, formData, {
     headers: {
       'Content-Type': 'multipart/form-data'
     },
@@ -195,9 +204,13 @@ export async function importProducts(file: File): Promise<{ success: boolean; me
  * 导出产品数据为Excel
  */
 export async function exportProducts(): Promise<void> {
+  const API_BASE_URL = import.meta.env.PROD 
+    ? 'https://insurance-policy-manager-production.up.railway.app/api'
+    : '/api';
+  
   // 创建一个临时的a标签来触发下载
   const link = document.createElement('a')
-  link.href = `/api/products/export?t=${Date.now()}`
+  link.href = `${API_BASE_URL}/products/export?t=${Date.now()}`
   link.download = `保险产品库导出-${Date.now()}.xlsx`
   document.body.appendChild(link)
   link.click()
@@ -287,10 +300,14 @@ export async function importCoverageLibrary(data: {
  * 导出责任库数据
  */
 export async function exportCoverageLibrary(filters?: any): Promise<void> {
+  const API_BASE_URL = import.meta.env.PROD 
+    ? 'https://insurance-policy-manager-production.up.railway.app/api'
+    : '/api';
+  
   // 直接使用axios获取blob，绕过响应拦截器
   // 创建一个新的axios实例，不使用拦截器
   const axiosInstance = axios.create({
-    baseURL: '/api',
+    baseURL: API_BASE_URL,
     timeout: 180000,
     responseType: 'blob'
   })

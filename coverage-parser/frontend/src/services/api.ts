@@ -17,7 +17,7 @@ const API_BASE_URL = import.meta.env.PROD
 // 创建axios实例
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 180000, // 3分钟超时（LLM调用可能需要较长时间）
+  timeout: 300000, // 5分钟超时（Railway冷启动可能需要较长时间）
   headers: {
     'Content-Type': 'application/json',
   },

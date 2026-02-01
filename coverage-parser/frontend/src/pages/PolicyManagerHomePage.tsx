@@ -107,13 +107,19 @@ export default function PolicyManagerHomePage() {
     loadData()
   }, [])
 
-  const loadData = async () => {
+  const loadData = async (retryCount = 0) => {
     try {
       setLoading(true)
+      
+      // 添加超时提示
+      const loadingMessage = message.loading('正在加载数据...', 0)
+      
       const [policiesData, membersData] = await Promise.all([
         getPolicies(1),
         getFamilyMembers(1)
       ])
+      
+      loadingMessage()
       setPolicies(policiesData)
       setFamilyMembers(membersData)
       
@@ -124,9 +130,24 @@ export default function PolicyManagerHomePage() {
         // 从现有成员中提取数据到表单
         initFormFromMembers(membersData)
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('加载数据失败:', error)
-      message.error('加载数据失败')
+      
+      // 如果是超时或网络错误，提供重试选项
+      if (retryCount < 2 && (error.code === 'ECONNABORTED' || error.message?.includes('timeout') || error.message?.includes('Network Error'))) {
+        Modal.confirm({
+          title: '连接超时',
+          content: '服务器响应时间较长，可能正在启动中。是否重试？',
+          okText: '重试',
+          cancelText: '取消',
+          onOk: () => loadData(retryCount + 1)
+        })
+      } else {
+        message.error({
+          content: '加载数据失败，请检查网络连接或稍后重试',
+          duration: 5
+        })
+      }
     } finally {
       setLoading(false)
     }
@@ -434,7 +455,74 @@ export default function PolicyManagerHomePage() {
         </div>
         </div>
 
+      {/* 加载状态 - 优化显示 */}
+      {loading && displayMembers.length === 0 && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '400px',
+          gap: '24px'
+        }}>
+          <div style={{
+            width: '64px',
+            height: '64px',
+            border: '4px solid #e5e7eb',
+            borderTop: '4px solid #01BCD6',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <div style={{ fontSize: '16px', color: '#666', textAlign: 'center' }}>
+            <div style={{ marginBottom: '8px' }}>正在连接服务器...</div>
+            <div style={{ fontSize: '14px', color: '#999' }}>首次访问可能需要30-60秒启动服务</div>
+          </div>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
+        </div>
+      )}
+
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+        
+        {/* 添加保单按钮 - 固定在右下角 */}
+        <button
+          onClick={() => navigate('/smart-input')}
+          style={{
+            position: 'fixed',
+            bottom: '32px',
+            right: '32px',
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #01BCD6 0%, #00A3BD 100%)',
+            border: 'none',
+            boxShadow: '0 8px 24px rgba(1, 188, 214, 0.4)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            transition: 'all 0.3s'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'scale(1.1)'
+            e.currentTarget.style.boxShadow = '0 12px 32px rgba(1, 188, 214, 0.5)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'scale(1)'
+            e.currentTarget.style.boxShadow = '0 8px 24px rgba(1, 188, 214, 0.4)'
+          }}
+          title="添加保单"
+        >
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </button>
 
         {/* 家庭信息登记表单（展开时显示） */}
         {showFamilyForm && (
@@ -961,11 +1049,55 @@ export default function PolicyManagerHomePage() {
           </div>
 
         {displayPolicies.length === 0 && !loading && !showFamilyForm && (
-          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#999' }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
-            <div style={{ fontSize: '16px' }}>{filteredMemberId ? '该成员暂无保单' : '暂无保单，点击左侧"保单智能录入"开始录入'}</div>
+          <div style={{ 
+            textAlign: 'center', 
+            padding: '80px 20px', 
+            display: 'flex', 
+            flexDirection: 'column', 
+            alignItems: 'center',
+            gap: '24px'
+          }}>
+            <div style={{ fontSize: '64px', marginBottom: '8px' }}>📋</div>
+            <div style={{ fontSize: '18px', color: '#666', marginBottom: '8px' }}>
+              {filteredMemberId ? '该成员暂无保单' : '暂无保单记录'}
             </div>
-          )}
+            <button
+              onClick={() => navigate('/smart-input')}
+              style={{
+                padding: '16px 48px',
+                fontSize: '18px',
+                fontWeight: 600,
+                color: '#fff',
+                background: 'linear-gradient(135deg, #01BCD6 0%, #00A3BD 100%)',
+                border: 'none',
+                borderRadius: '32px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                boxShadow: '0 8px 24px rgba(1, 188, 214, 0.3)',
+                transition: 'all 0.3s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)'
+                e.currentTarget.style.boxShadow = '0 12px 32px rgba(1, 188, 214, 0.4)'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)'
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(1, 188, 214, 0.3)'
+              }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              立即添加保单
+            </button>
+            <div style={{ fontSize: '14px', color: '#999', marginTop: '8px' }}>
+              点击按钮开始录入您的第一份保单
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
